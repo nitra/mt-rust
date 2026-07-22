@@ -20,6 +20,7 @@
 ## Інше в репозиторії
 
 - `relay/` — `@7n/relay`, Bun/JS координатор relay-частини протоколу (кімнати Envelope, membership, роздача pubkey)
+- `layers/` — `@7n/layers`, рушій шарової документації (подвійний CRC, LLM-генерація верхніх шарів, derived-переклади); корпус доків, який він обробляє, живе в [nitra/mt](https://github.com/nitra/mt) (`docs/`), тут — лише сам рушій. Запуск проти sibling-checkout: `bun ./layers/lib/cli.mjs status ../mt/docs`
 - `packages/` — платформні npm-підпакети (`@7n/mt-darwin-arm64`, `@7n/mt-linux-x64`) з prebuilt-бінарниками, що збираються в CI цього репозиторію
 - `mt/` — dogfood-граф задач цього проєкту (`@7n/mt` on `@7n/mt`)
 - `docs/adr/` — інженерна історія архітектурних рішень (ADR)

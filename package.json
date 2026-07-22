@@ -4,13 +4,15 @@
   "private": true,
   "workspaces": [
     "relay",
+    "layers",
     "crates/mt-napi"
   ],
   "type": "module",
   "scripts": {
     "test": "bunx --bun vitest run",
     "oxfmt": "oxfmt .",
-    "coverage": "npx @7n/test coverage"
+    "coverage": "npx @7n/test coverage",
+    "layers": "bun ./layers/lib/cli.mjs"
   },
   "devDependencies": {
     "@7n/rules": "^1.36.1",

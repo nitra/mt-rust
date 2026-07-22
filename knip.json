@@ -38,6 +38,10 @@
     "relay": {
       "entry": ["lib/relay.mjs", "stryker.config.mjs", "**/*.test.{js,mjs}"],
       "project": ["**/*.{js,mjs}"]
+    },
+    "layers": {
+      "entry": ["lib/cli.mjs", "lib/status.mjs", "stryker.config.mjs", "**/*.test.{js,mjs}"],
+      "project": ["**/*.{js,mjs}"]
     }
   }
 }
