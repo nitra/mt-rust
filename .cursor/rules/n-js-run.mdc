@@ -1,0 +1,175 @@
+---
+description: Це правила для backend проектів на JavaScript/Node.js, сюди входять і job і WEB сервери.
+globs: "**/package.json,**/jsconfig.json,**/src/**/*.{js,mjs,cjs,ts,tsx}"
+alwaysApply: false
+version: '1.12'
+---
+
+Правило охоплює backend Node.js workspace-пакети (jobs, GraphQL/HTTP-сервери, CLI) — визначення меж застосування, вимоги до runtime, структуру проекту, конфігурацію, логування, підключення до БД/GraphQL і безпечне використання env-змінних.
+
+## Швидкий gate через conftest
+
+Rego-пакети, які запускає `npx @7n/rules fix js-run` / `npx @7n/rules check`:
+
+- `jsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "lib": ["esnext"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "esnext",
+    "checkJs": false
+  },
+  "include": ["src/**/*"]
+}
+```
+
+- `configmap.yaml`:
+
+```yaml
+data:
+  OTEL_RESOURCE_ATTRIBUTES:
+    - 'service.name='
+    - 'service.namespace='
+```
+
+- `package.json`:
+
+```json
+{
+  "dependencies": {
+    "bunyan": "використовуй стандартні логери (js-run.mdc)",
+    "@nitra/bunyan": "використовуй стандартні логери (js-run.mdc)"
+  },
+  "devDependencies": {
+    "bunyan": "використовуй стандартні логери (js-run.mdc)",
+    "@nitra/bunyan": "використовуй стандартні логери (js-run.mdc)"
+  },
+  "scriptsForbidden": [
+    {
+      "id": "node-runner",
+      "pattern": "\\bnode(\\s|$)",
+      "message": "заміни `node` на `bun` у scripts — один runtime у dev і prod (js-run.mdc)"
+    },
+    {
+      "id": "env-cat-bun",
+      "pattern": "\\benv\\s+\\$\\(cat\\s+[^)]+\\)\\s+bun\\b",
+      "message": "заміни `env $(cat A B) bun` на `bun --env-file=A --env-file=B` (нативний Bun, js-run.mdc)"
+    }
+  ]
+}
+```
+
+## Rego-gate: OTEL ConfigMap (k8s)
+
+Rego-пакет: `js-run.configmap`
+
+**Цільові файли:** `k8s/base/configmap.yaml` (і будь-які ConfigMap у kustomize-оверлеях)
+
+**Умова спрацювання:** `input.kind == "ConfigMap"`
+
+Перевіряє, що поле `data.OTEL_RESOURCE_ATTRIBUTES` містить усі обовʼязкові substring-маркери, визначені у template:
+
+- `service.name=`
+- `service.namespace=`
+
+Канон маркерів: [configmap.yaml.contains.yml](./template/configmap.yaml.contains.yml)
+
+**✓ Правильно**
+
+```yaml
+data:
+  OTEL_RESOURCE_ATTRIBUTES: 'service.name=my-svc,service.namespace=prod'
+```
+
+**✗ Неправильно**
+
+```yaml
+data:
+  OTEL_RESOURCE_ATTRIBUTES: 'service.name=my-svc'
+# Відсутній service.namespace= → deny
+```
+
+Ресурси типу `kind: Deployment` та інші non-ConfigMap — ігноруються.
+
+## Rego-gate: jsconfig.json
+
+Rego-пакет: `js-run.jsconfig`
+
+**Цільові файли:** `jsconfig.json` у корені backend workspace-пакету
+
+Порівнює `jsconfig.json` з каноном через walker по всіх листах template:
+
+- `compilerOptions.*` — значення мають збігатись точно
+- `include` — масив порівнюється як множина (точний склад)
+
+Канон: [jsconfig.json.snippet.json](./template/jsconfig.json.snippet.json)
+
+Перевірені поля:
+
+| Поле | Очікуване значення |
+|------|--------------------|
+| `compilerOptions.module` | `"NodeNext"` |
+| `compilerOptions.moduleResolution` | `"NodeNext"` |
+| `compilerOptions.target` | `"esnext"` |
+| `compilerOptions.lib` | `["esnext"]` |
+| `compilerOptions.checkJs` | `false` |
+| `include` | `["src/**/*"]` |
+
+Якщо розділ `compilerOptions` відсутній або не є обʼєктом — deny.
+
+## Rego-gate: package.json (залежності та scripts)
+
+Rego-пакет: `js-run.package_json`
+
+**Цільові файли:** `package.json` у backend workspace-пакетах (без `vite` у `devDependencies`)
+
+Перевіряє три класи порушень за deny-списком із template:
+
+Канон deny-списку: [package.json.deny.json](./template/package.json.deny.json)
+
+**1. Заборонені залежності** (`dependencies` / `devDependencies`)
+
+| Пакет | Причина |
+|-------|---------|
+| `bunyan` | використовуй стандартні логери |
+| `@nitra/bunyan` | використовуй стандартні логери |
+
+**2. Заборонений рантайм у `scripts`** (лише backend-пакети без `vite`)
+
+- Патерн `\bnode(\s|$)` — заміни `node` на `bun`
+- Патерн `\benv\s+\$\(cat\s+[^)]+\)\s+bun\b` — заміни `env $(cat A B) bun` на `bun --env-file=A --env-file=B`
+
+**✓ Правильно**
+
+```json
+{ "scripts": { "start": "bun src/index.js" } }
+{ "scripts": { "start": "bun --env-file=.env src/index.js" } }
+```
+
+**✗ Неправильно**
+
+```json
+{ "scripts": { "start": "node src/index.js" } }
+{ "scripts": { "start": "env $(cat .env .env.local) bun src/index.js" } }
+{ "dependencies": { "bunyan": "^1.0.0" } }
+```
+
+Пакети з `vite` у `devDependencies` — frontend, поза областю js-run, перевірка scripts не застосовується.
+
+## Runtime у `package.json#scripts`
+
+У **backend**-пакетах (без `vite` у `devDependencies`) код запускають через **Bun**, не через бінарник **`node`** у значеннях `scripts`:
+
+- `"start": "node src/index.js"` → `"start": "bun src/index.js"` (або `bun run …`, якщо так прийнято в репо);
+- `node --watch app.js` → `bun --watch app.js`;
+- `NODE_OPTIONS=… node app.js` → `NODE_OPTIONS=… bun app.js`.
+- `env $(cat .env .env.local) bun src/index.js` → `bun --env-file=.env --env-file=.env.local src/index.js` (нативне завантаження env у Bun, без `env`/`cat`).
+
+Заборонено викликати **`node`** у ланцюжках (`&&`, `;`, `|`). Заборонено обгортку **`env $(cat …) bun`** — файли з `cat` перелічуй у **`--env-file=`** (по одному прапорцю на файл, порядок як у `cat`). Допустимо: `bun`, `bunx`, `npx` (див. **bun.mdc**), інші CLI, якщо вони не підміняють рантайм на `node`.
+
+Це **не** стосується поля `engines.node` (мінімальна версія Node для сумісності інструментів) і **не** стосується frontend-пакетів з `vite` у `devDependencies`.
+
+Канон заборонених патернів у `scripts`: [package.json.deny.json](./policy/package_json/template/package.json.deny.json) (`scriptsForbidden`).

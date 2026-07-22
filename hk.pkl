@@ -1,0 +1,13 @@
+amends "package://github.com/jdx/hk/releases/download/v1.42.0/hk@1.42.0#/Config.pkl"
+
+// npm/ (тонкий JS-клієнт @7n/mt) переїхав у nitra/mt-js — npm-специфічні
+// pre-commit кроки (tsc emit-types, changelog) там, не тут.
+local linters = new Mapping<String, Step> {}
+
+hooks {
+    ["pre-commit"] {
+        fix = true
+        stash = "git"
+        steps = linters
+    }
+}

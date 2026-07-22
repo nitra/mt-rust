@@ -1,0 +1,23 @@
+{
+  "name": "@7n/mt-darwin-arm64",
+  "version": "0.2.0",
+  "description": "Prebuilt mt-scanner binary and mt napi addon for macOS arm64 (Apple Silicon)",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nitra/mt-rust.git"
+  },
+  "files": [
+    "mt-scanner",
+    "mt.darwin-arm64.node"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,38 @@
+---
+description: Оптимізація raster/SVG через @nitra/minify-image у n-rules lint
+version: '1.2'
+globs: "**/*.{png,jpg,jpeg,gif,svg}"
+alwaysApply: false
+---
+
+CLI [`@nitra/minify-image`](https://www.npmjs.com/package/@nitra/minify-image) (≥ **4.0.1**) запускається через `npx` і **не** додається в `dependencies` / `devDependencies`. Запуск — через **`n-rules lint image-compress`**: локально (fix) виконує `npx @nitra/minify-image --src=. --write`, у `--no-fix` виконує `npx @nitra/minify-image --src=. --json` і падає, якщо `summary.needsCompression > 0`. **AVIF-генерація (`--avif`) у `image-compress` не входить** — її виконує окреме правило `image-avif`.
+
+Окремий workflow `lint-image.yml` створювати не треба; якщо потрібен CI-gate для зображень, використовуй `n-rules lint image-compress --no-fix`.
+
+## Заборона `@nitra/minify-image` у залежностях (`package.json`)
+
+Rego-пакет: `image_compress.package_json`
+
+Цільовий файл: `package.json` (єдиний файл проєкту).
+
+Перевіряє поля `dependencies` та `devDependencies`: якщо там присутній пакет `@nitra/minify-image` — deny. Список заборонених пакетів надходить через `--data` з канонічного шаблону:
+
+[package.json.deny.json](./template/package.json.deny.json)
+
+✓ `{}` — порожній `package.json` без залежностей
+✗ `{ "dependencies": { "@nitra/minify-image": "^4.0.1" } }` — заборонено, використовуй `npx`
+✗ `{ "devDependencies": { "@nitra/minify-image": "^4.0.1" } }` — заборонено, використовуй `npx`
+
+## Кеш-файли: що зберігати в git
+
+**`.n-minify-image.tsv`** у корені сканованого каталогу — **має бути в git** (source of truth для sha1-перевірок і lifetime savings). У `.gitignore` його не додавай.
+
+**`node_modules/.cache/@nitra/minify-image/mtime.tsv`** — локальний fast-path; авто-gitignored через `node_modules/`.
+
+Застарілий **`.minify-image-cache.tsv`** у корені (з версій `@nitra/minify-image` < 3.2) — видали після міграції на split-cache:
+
+```sh
+git rm --cached .minify-image-cache.tsv 2>/dev/null || true && rm -f .minify-image-cache.tsv
+```
+
+Також прибери відповідний рядок з `.gitignore`, якщо є.

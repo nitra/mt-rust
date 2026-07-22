@@ -1,0 +1,19 @@
+[package]
+name = "mt-core"
+description = "Core library for @7n/mt task graphs: scan, create, derived states"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "mt_core"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

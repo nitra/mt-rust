@@ -1,0 +1,47 @@
+2026-06-03T06:32:19+03:00 drafts found: 0 (threshold: 30)
+2026-06-03T06:33:35+03:00 drafts found: 1 (threshold: 30)
+2026-06-03T06:34:56+03:00 drafts found: 2 (threshold: 30)
+2026-06-03T06:37:07+03:00 drafts found: 3 (threshold: 30)
+2026-06-03T06:40:38+03:00 drafts found: 4 (threshold: 30)
+2026-06-03T06:41:31+03:00 drafts found: 5 (threshold: 30)
+2026-06-03T06:42:28+03:00 drafts found: 5 (threshold: 30)
+2026-06-03T06:46:10+03:00 drafts found: 7 (threshold: 30)
+2026-06-03T06:48:35+03:00 drafts found: 8 (threshold: 30)
+2026-06-03T06:49:53+03:00 drafts found: 9 (threshold: 30)
+2026-06-03T06:50:58+03:00 drafts found: 10 (threshold: 30)
+2026-06-03T19:12:31+03:00 drafts found: 10 (threshold: 30)
+2026-06-03T19:21:56+03:00 drafts found: 58 (threshold: 30)
+2026-06-03T19:21:56+03:00 batch size: 10
+2026-06-03T19:21:56+03:00 using claude CLI (model: sonnet)
+2026-06-03T19:24:34+03:00 operations parsed: 10
+2026-06-03T19:24:34+03:00 delete: 20260603-063240-перейменування-bin-entrypoint-та-усунення-у-полі-bin-package.md — Проміжний стан (cli.js, не фінальний n.js). Рішення про видалення ./ зафіксовано в 20260603-064710-npm-bin-без-провідного-слеша.md, рішення про перейменування — в 20260603-065029-bin-ентрипоінт-n.md. Жодного нового змісту.
+2026-06-03T19:24:34+03:00 delete: 20260603-063420-формат-шляху-bin-у-package-json-без-префікса.md — Дублює DRAFT-001 — ті самі два рішення (видалення ./ і перейменування у cli), обидва вже покриті чистими ADR-ами. Нового змісту немає.
+2026-06-03T19:24:34+03:00 delete: 20260603-063515-перейменування-bin-entrypoint-та-усунення-у-полі-bin-package.md — Проміжний стан з артефактами («publishConfig.access: public збережено. Тепер можна: npm publish. Готово.»). Всі рішення покриті чистими ADR-ами. Нового змісту немає.
+2026-06-03T19:24:34+03:00 delete: 20260603-063750-перейменування-bin-entrypoint-та-усунення-префікса-у-полі-bi.md — Проміжний стан (команда cli, не n). Нюанс про scripts.start із ./ вже наявний у 20260603-064710-npm-bin-без-провідного-слеша.md (через DRAFT-008, що є джерелом цього clean-ADR). Решта рішень покрита. Нічого нового.
+2026-06-03T19:24:34+03:00 delete: 20260603-064126-перейменування-bin-ентрипоінту-та-команди-cli.md — Проміжний стан: пакет @7n/cli (не фінальний @7n/n), команда cli. Всі чотири рішення (rename, ./, publishConfig, package name) вже покриті чотирма clean-ADR-ами.
+2026-06-03T19:24:35+03:00 delete: 20260603-064231-перейменування-bin-ентрипоінта-та-усунення-префікса-у-полі-b.md — Проміжний стан із назвою пакета @7n/n (ще до фінального коміту). Всі три рішення (видалення ./, @7n/n, publishConfig) повністю покриті clean-ADR-ами. Нічого нового.
+2026-06-03T19:24:35+03:00 delete: 20260603-064325-формат-шляху-bin-у-package-json-без-префікса.md — Це джерельний драфт, з якого вже створено clean-ADR 20260603-064325-publishconfig-access-public.md (збіг timestamp-префіксу 064325). Зміст перенесено.
+2026-06-03T19:24:35+03:00 delete: 20260603-064710-видалення-префікса-у-значенні-bin-у-package-json.md — Це джерельний драфт, з якого вже створено clean-ADR 20260603-064710-npm-bin-без-провідного-слеша.md (збіг timestamp-префіксу 064710). Зміст, включно з нюансом scripts.start, вже там.
+2026-06-03T19:24:35+03:00 delete: 20260603-064916-назва-bin-файлу-n-js-замість-числового-7-js.md — Це джерельний драфт, з якого вже створено clean-ADR 20260603-064916-npm-package-name-7n-n.md (збіг timestamp-префіксу 064916). Зміст перенесено.
+2026-06-03T19:24:35+03:00 delete: 20260603-065029-вибір-шляху-до-bin-ентрипоїнту-в-package-json-без-провідного.md — Це джерельний драфт, з якого вже створено clean-ADR 20260603-065029-bin-ентрипоінт-n.md (збіг timestamp-префіксу 065029). Зміст, включно з примою про версію 0.1.0/0.1.1, вже там.
+2026-06-03T19:24:35+03:00 done (applied 10, skipped 0)
+2026-06-03T19:31:34+03:00 skip: only 578 s since last attempt (min 21600s)
+2026-06-03T19:44:26+03:00 skip: only 1350 s since last attempt (min 21600s)
+2026-06-03T19:47:03+03:00 skip: only 1507 s since last attempt (min 21600s)
+2026-06-03T19:53:09+03:00 skip: only 1873 s since last attempt (min 21600s)
+2026-06-03T19:58:38+03:00 skip: only 2202 s since last attempt (min 21600s)
+2026-06-03T20:00:49+03:00 skip: only 2333 s since last attempt (min 21600s)
+2026-06-03T20:06:39+03:00 skip: only 2683 s since last attempt (min 21600s)
+2026-06-03T20:11:10+03:00 skip: only 2954 s since last attempt (min 21600s)
+2026-06-03T20:12:25+03:00 skip: only 3029 s since last attempt (min 21600s)
+2026-06-03T20:17:20+03:00 skip: only 3324 s since last attempt (min 21600s)
+2026-06-03T20:24:20+03:00 skip: only 3744 s since last attempt (min 21600s)
+2026-06-03T20:28:49+03:00 skip: only 4013 s since last attempt (min 21600s)
+2026-06-03T20:31:25+03:00 skip: only 4169 s since last attempt (min 21600s)
+2026-06-03T20:33:11+03:00 skip: only 4275 s since last attempt (min 21600s)
+2026-06-03T20:36:27+03:00 skip: only 4471 s since last attempt (min 21600s)
+2026-06-03T21:12:13+03:00 skip: only 6617 s since last attempt (min 21600s)
+2026-06-03T21:12:17+03:00 skip: only 6621 s since last attempt (min 21600s)
+2026-06-08T17:46:39+03:00 drafts found: 149 (threshold: 30)
+2026-06-08T17:46:39+03:00 batch size: 10
+2026-06-08T17:46:40+03:00 using claude CLI (model: sonnet)

@@ -1,0 +1,18 @@
+{
+  "mt_dir": "./mt",
+  "worktrees_dir": "./.worktrees",
+  "warn_worktrees_above": 4,
+  "max_worktrees": 8,
+  "default_budget_sec": 1800,
+  "default_mode": "human",
+  "default_model_tier": "AVG",
+  "budget_hard_sec_multiplier": 3,
+  "progress_timeout_sec": 300,
+  "agent_concurrency": 5,
+  "claim_lease_sec": 3600,
+  "claim_grace_sec": 60,
+  "publish_retry_max": 8,
+  "publish_retry_base_ms": 250,
+  "stale_worktree_min": 30,
+  "system_prompt": ".mt/system-prompt.md"
+}

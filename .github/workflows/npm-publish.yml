@@ -1,0 +1,137 @@
+name: npm-publish
+
+on:
+  push:
+    paths:
+      - 'crates/**'
+      - 'packages/**'
+    branches:
+      - main
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions: {} # deny-all за замовчуванням; кожен job оголошує потрібне
+
+jobs:
+  # ── Збірка prebuilt-артефактів (mt-scanner бінарник + mt napi-аддон) ──────────
+  build-binaries:
+    permissions:
+      contents: read # лише checkout; артефакти йдуть через runtime-токен
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-14 # native Apple Silicon
+            target: aarch64-apple-darwin
+            napi-target: aarch64-apple-darwin
+            pkg: mt-darwin-arm64
+            napi-artifact: mt.darwin-arm64.node
+            cdylib: libmt_napi.dylib
+            zig: false
+          - os: ubuntu-latest # бінарник — static musl через cargo-zigbuild; аддон — gnu
+            target: x86_64-unknown-linux-musl
+            napi-target: x86_64-unknown-linux-gnu
+            pkg: mt-linux-x64
+            napi-artifact: mt.linux-x64-gnu.node
+            cdylib: libmt_napi.so
+            zig: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false # build-only, токен не потрібен
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }},${{ matrix.napi-target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-zigbuild (Linux musl)
+        if: ${{ matrix.zig }}
+        run: |
+          pip install ziglang
+          cargo install --locked cargo-zigbuild
+
+      - name: Build mt-scanner (zigbuild)
+        if: ${{ matrix.zig }}
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p mt-cli
+
+      - name: Build mt-scanner (native)
+        if: ${{ !matrix.zig }}
+        run: cargo build --release --target ${{ matrix.target }} -p mt-cli
+
+      # napi-аддон — cdylib; .node = той самий файл під napi-конвенцією імені.
+      - name: Build mt napi addon
+        run: cargo build --release --target ${{ matrix.napi-target }} -p mt-napi
+
+      - name: Stage artifacts into platform package
+        run: |
+          cp "target/${{ matrix.target }}/release/mt-scanner" "packages/${{ matrix.pkg }}/mt-scanner"
+          chmod +x "packages/${{ matrix.pkg }}/mt-scanner"
+          cp "target/${{ matrix.napi-target }}/release/${{ matrix.cdylib }}" "packages/${{ matrix.pkg }}/${{ matrix.napi-artifact }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pkg }}
+          path: |
+            packages/${{ matrix.pkg }}/mt-scanner
+            packages/${{ matrix.pkg }}/*.node
+          if-no-files-found: error
+
+  # ── Release-bump + публікація платформних підпакетів (@7n/mt-*) ───────────────
+  release-publish:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # commit-back версії + git-тег
+      id-token: write # OIDC + provenance
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false # токен для push — через окремий крок, не залишковий credential
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-bun-deps
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24' # includes npm@11.6.0
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Configure git identity + push auth
+        # persist-credentials лишається false (ga-rule, безпека): checkout не зберігає токен.
+        # Release робить commit-back `git push`, тож даємо job-scoped ephemeral GITHUB_TOKEN
+        # явно через remote-url (а не persisted у git config усього прогону).
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+
+      - name: Download platform binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: packages # → packages/<pkg>/{mt-scanner, mt.<triple>.node}
+
+      - name: Release (bump + CHANGELOG + tag)
+        run: bunx n-cursor release
+
+      # download-artifact не зберігає executable-біт; відновлюємо його перед публікацією.
+      - name: Restore executable permission on mt-scanner binaries
+        run: |
+          chmod +x packages/mt-darwin-arm64/mt-scanner
+          chmod +x packages/mt-linux-x64/mt-scanner
+
+      - name: Publish @7n/mt-darwin-arm64
+        uses: JS-DevTools/npm-publish@v4.1.5
+        with:
+          package: packages/mt-darwin-arm64/package.json
+
+      - name: Publish @7n/mt-linux-x64
+        uses: JS-DevTools/npm-publish@v4.1.5
+        with:
+          package: packages/mt-linux-x64/package.json

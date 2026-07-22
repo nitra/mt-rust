@@ -1,0 +1,5 @@
+{
+  "_comment": "Тест-вектори валідації імен вузлів (validate_name у crates/mt-core/src/lib.rs через include_str!). Історично спільні з JS (validateTaskName), який тепер живе в nitra/mt-js — синхронізуй вручну при зміні правил валідації.",
+  "valid": ["a", "a-b", "a/b/c", "research/collect-data"],
+  "invalid": ["", "a//b", "/a", "a/", "a/../b", "..", "a/.", "Research", "a b", "a_b"]
+}

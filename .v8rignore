@@ -1,0 +1,6 @@
+.vscode/extensions.json
+.vscode/settings.json
+.git/**
+.cursor/hooks.json
+.marksman.toml
+.claude/settings.local.json

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://unpkg.com/@7n/rules/schemas/n-rules.json",
+  "rules": [
+    "adr",
+    "bun",
+    "changelog",
+    "ci4",
+    "doc-files",
+    "feedback",
+    "ga",
+    "image-compress",
+    "js",
+    "js-run",
+    "npm-module",
+    "rust",
+    "security",
+    "test",
+    "text",
+    "worktree"
+  ],
+  "ignore": [
+    ".worktrees"
+  ],
+  "skills": [
+    "adr-normalize",
+    "brainstorming",
+    "doc-files",
+    "lint",
+    "llm-patch",
+    "publish-telegram",
+    "taze"
+  ]
+}

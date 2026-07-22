@@ -1,0 +1,394 @@
+---
+description: Обробка та перевірка текстових файлів, oxfmt, cspell, shellcheck (sh), dotenv-linter (.env*), markdownlint-cli2, v8r, CI
+alwaysApply: true
+version: '1.30'
+---
+
+Правило охоплює весь текстовий стек проєкту: форматування (oxfmt), перевірку правопису (cspell), shell-скрипти (shellcheck), `.env`-файли (dotenv-linter), Markdown (markdownlint-cli2), JSON/YAML/TOML-схеми (v8r) та CI-workflow.
+
+## Швидкий gate через conftest
+
+Rego-пакети, що перевіряються через conftest (auto-discovered за `target.json` поряд із `.rego`):
+
+- `settings.json`:
+
+```json
+{
+  "editor.formatOnSave": true,
+  "[javascript]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[typescript]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[json]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[vue]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[css]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[html]": { "editor.defaultFormatter": "oxc.oxc-vscode" }
+}
+```
+
+- `.oxfmtrc.json`:
+
+```json
+{
+  "semi": false,
+  "singleQuote": true,
+  "tabWidth": 2,
+  "useTabs": false,
+  "printWidth": 120,
+  "ignorePatterns": ["**/hasura/metadata/**", "**/schema.graphql", "**/auto-imports.d.ts"]
+}
+```
+
+- `.markdownlint-cli2.jsonc`:
+
+```
+{
+  "gitignore": true,
+  "config": {
+    "default": true,
+    "MD013": false,
+    "MD024": { "siblings_only": true },
+    "MD029": false,
+    "MD040": false,
+    "MD041": false
+  }
+}
+```
+
+- `.cspell.json`:
+
+```json
+{
+  "version": "0.2",
+  "useGitignore": true,
+  "gitignoreRoot": ".",
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/vscode-extension/**",
+    "**/.git/**",
+    ".vscode",
+    "report",
+    "*.svg",
+    "**/k8s/**/*.yaml",
+    "docs/adr/**"
+  ]
+}
+```
+
+- `.cspell.json`:
+
+```json
+{
+  "import-substrings": {
+    "@cspell/dict-": "використовуй лише @nitra/cspell-dict (text.mdc)"
+  }
+}
+```
+
+- `.cspell.json`:
+
+```json
+{
+  "import": ["@nitra/cspell-dict"]
+}
+```
+
+- `extensions.json`:
+
+```json
+{
+  "recommendations": ["DavidAnson.vscode-markdownlint", "oxc.oxc-vscode", "timonwong.shellcheck"]
+}
+```
+
+- `lint-text.yml`:
+
+```yaml
+name: Lint Text
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.vue'
+      - '**/*.html'
+      - '**/*.css'
+      - '**/*.scss'
+      - '**/*.less'
+      - '**/*.json'
+      - '**/*.jsonc'
+      - '**/*.yaml'
+      - '**/*.yml'
+      - '**/*.toml'
+      - '**/*.xml'
+      - '**/*.md'
+      - '**/*.mdc'
+      - '**/*.mdс'
+      - '**/*.txt'
+      - '**/*.go'
+      - '**/*.py'
+      - '**/*.php'
+      - '**/*.sh'
+
+  pull_request:
+    branches:
+      - dev
+      - main
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  text:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bun-deps
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Install dotenv-linter
+        run: >-
+          curl -sSfL https://git.io/JLbXn
+          | sh -s -- -b /usr/local/bin
+
+      - name: Lint text
+        run: bunx n-rules lint text --no-fix
+```
+
+- `package.json`:
+
+```json
+{
+  "top-level": {
+    "prettier": "Prettier заборонено — використовуй oxfmt (text.mdc)"
+  },
+  "dependencies": {
+    "prettier": "Prettier заборонено — використовуй oxfmt (text.mdc)",
+    "@nitra/prettier-config": "Prettier-конфіг заборонено — використовуй oxfmt (text.mdc)",
+    "markdownlint-cli2": "використовуй bunx у lint-text (text.mdc)"
+  },
+  "devDependencies": {
+    "prettier": "Prettier заборонено — використовуй oxfmt (text.mdc)",
+    "@nitra/prettier-config": "Prettier-конфіг заборонено — використовуй oxfmt (text.mdc)",
+    "markdownlint-cli2": "використовуй bunx у lint-text (text.mdc)"
+  }
+}
+```
+
+**Український апостроф:** у словах вживай прямий апостроф U+0027 (`'`, як в `об'єкт`), а не типографський U+2019 (`’`); слова з апострофом додавай у масив `words` cspell-конфігу.
+
+## Перевірка `.cspell.json` — структура та canonical import
+
+Rego-пакет: `text.cspell`
+
+Цільовий файл: `.cspell.json`
+
+**Що перевіряється:**
+
+- `version` — має відповідати канону (наразі `"0.2"`)
+- `useGitignore` — має бути `true`: cspell поважає всі `.gitignore` репо, тож білд-артефакти (`target/`, `dist/` тощо) не потрапляють у прогін і не потребують дублювання в `ignorePaths`
+- `gitignoreRoot` — має бути `"."`: обмежує збір `.gitignore` коренем репо. Без цього cspell підіймається каталогами вище і в git-worktree застосовує `.gitignore` основного дерева (патерн на кшталт `.claude/worktrees/` матчить усе) → «Files checked: 0», делта-лінт мовчки зелений при червоному CI
+- `language` — поле обов'язкове (presence-only, значення довільне, наприклад `"en,uk"`)
+- `ignorePaths` — масив має бути надмножиною канонічних glob-ів, включно з `docs/adr/**`
+- `import` — має містити підрядок `@nitra/cspell-dict`; заборонені будь-які записи з підрядком `@cspell/dict-` (використовуй лише `@nitra/cspell-dict`)
+
+**Приклади:**
+
+✓ правильно:
+
+```json
+{
+  "version": "0.2",
+  "language": "en,uk",
+  "useGitignore": true,
+  "gitignoreRoot": ".",
+  "import": ["@nitra/cspell-dict/cspell-ext.json"],
+  "ignorePaths": ["**/node_modules/**", "**/.git/**", "docs/adr/**"]
+}
+```
+
+✗ неправильно:
+
+```json
+{
+  "version": "0.1",
+  "import": ["@cspell/dict-de"],
+  "ignorePaths": []
+}
+```
+
+(відсутнє `language`, застарілий `version`, заборонений `@cspell/dict-`, не всі canonical `ignorePaths`)
+
+## Заборона Prettier
+
+Prettier **повністю заборонено** — форматування лише через **oxfmt**.
+
+Також потрібно прибрати, якщо є в проєкті, модуль **`@nitra/prettier-config`**, **prettier** та всі виклики prettier і налаштування для нього. Канон заборонених top-level/`dependencies`/`devDependencies` (prettier, `@nitra/prettier-config`, `markdownlint-cli2`): [package.json.deny.json](./policy/package_json/template/package.json.deny.json)
+
+Перевірка `npx @7n/rules fix text` падає, якщо у корені є `.prettierignore`, `.prettierrc*`, `prettier.config.*` або у `package.json#scripts` зустрічається команда з `prettier`.
+
+Заборонені файли конфігурації Prettier у корені:
+
+- `.prettierignore`, `.prettierrc`, `.prettierrc.json`, `.prettierrc.jsonc`, `.prettierrc.json5`
+- `.prettierrc.yaml`, `.prettierrc.yml`, `.prettierrc.toml`
+- `.prettierrc.js`, `.prettierrc.cjs`, `.prettierrc.mjs`, `.prettierrc.ts`, `.prettierrc.cts`, `.prettierrc.mts`
+- `prettier.config.js`, `prettier.config.cjs`, `prettier.config.mjs`, `prettier.config.ts`, `prettier.config.cts`, `prettier.config.mts`
+
+## Перевірка `.github/workflows/lint-text.yml` — структура CI-workflow
+
+Rego-пакет: `text.lint_text`
+
+Цільовий файл: `.github/workflows/lint-text.yml`
+
+**Що перевіряється:**
+
+- `name` — має бути `"Lint Text"`
+- `on.push.branches` та `on.pull_request.branches` — мають містити `dev` і `main`
+- `on.push.paths` — має бути надмножиною канонічних glob-ів (усі текстові розширення)
+- `jobs.text` — job обов'язковий
+- `jobs.text.runs-on` — має бути `ubuntu-latest`
+- `jobs.text.permissions.contents` — має бути `read`
+- `jobs.text.steps` — не порожній; має містити всі канонічні `uses:` та `run:` підрядки
+
+Канонічна структура workflow: [lint-text.yml.snippet.yml](./template/lint-text.yml.snippet.yml)
+
+**Примітка:** conftest парсить YAML 1.1, де ключ `on:` без лапок перетворюється на булевий `true` — rego читає on-блок через `input["true"]`.
+
+## Перевірка `.markdownlint-cli2.jsonc` — конфігурація markdownlint
+
+Rego-пакет: `text.markdownlint`
+
+Цільовий файл: `.markdownlint-cli2.jsonc`
+
+**Що перевіряється (generic walker по канонічному snippet):**
+
+- Top-level scalar leafs (наприклад `gitignore: true`)
+- 2-рівневі leafs: `config.<rule>` — скалярні значення правил (MD013, MD029, MD040, MD041 тощо)
+- 3-рівневі leafs: `config.MD024.siblings_only` — вкладене поле
+- Наявність самого об'єкта `config` (якщо відсутній — deny)
+
+**Приклади:**
+
+✓ правильно:
+
+```jsonc
+{
+  "gitignore": true,
+  "config": {
+    "MD013": false,
+    "MD024": { "siblings_only": true },
+    "MD029": false,
+    "MD040": false,
+    "MD041": false
+  }
+}
+```
+
+✗ неправильно:
+
+```jsonc
+{
+  "gitignore": false,
+  "config": {
+    "MD024": {}
+  }
+}
+```
+
+## Форматування коду — oxfmt
+
+Усі файли формату-домени (`.js`, `.mjs`, `.cjs`, `.jsx`, `.ts`, `.tsx`, `.mts`, `.cts`, `.vue`, `.css`,
+`.scss`) мають бути відформатовані **oxfmt**. Prettier заборонено — див. `forbidden-prettier`. Канон
+формату — `.oxfmtrc.json` у корені проєкту (включно з `ignorePatterns`).
+
+`npx @7n/rules lint text` повідомляє неформатовані файли (`oxfmt --list-different`). Fix-режим
+(`npx @7n/rules lint`) виправляє їх детерміновано через `oxfmt --write` (T0, поза LLM). У CI
+(`--no-fix`) неформатовані файли — порушення без мутацій.
+
+Типи поза формату-доменою (`.md`, `.json`, `.yaml` тощо), де діє інше тулінг, цей концерн не зачіпає.
+
+## Перевірка `.oxfmtrc.json` — конфігурація oxfmt форматера
+
+Rego-пакет: `text.oxfmtrc`
+
+Цільовий файл: `.oxfmtrc.json`
+
+**Що перевіряється:**
+
+- Наявність усіх обов'язкових ключів (presence-only): `arrowParens`, `printWidth`, `bracketSpacing`, `bracketSameLine`, `semi`, `singleQuote`, `tabWidth`, `trailingComma`, `useTabs`
+- Scalar leafs: точні значення відповідно до канонічного snippet
+- `ignorePatterns`: масив має бути надмножиною канонічних glob-ів (subset-of перевірка)
+
+## Перевірка `package.json` — текст-специфічні обмеження
+
+Rego-пакет: `text.package_json`
+
+Цільовий файл: `package.json`
+
+**Що перевіряється:**
+
+- Заборонені top-level поля: `prettier`
+- Заборонені пакети у `dependencies` / `devDependencies`: `prettier`, `@nitra/prettier-config`, `markdownlint-cli2` (використовуй `bunx` у lint-text)
+- `@nitra/cspell-dict` обов'язковий у `devDependencies` з версією `^2.0.0` або новішою
+- `scripts.*` — будь-який скрипт, що викликає `prettier` (через `bunx`, `npx`, прямо або через шлях), заборонений; використовуй `oxfmt`
+
+Список заборонених пакетів: [package.json.deny.json](./template/package.json.deny.json)
+
+**Приклади:**
+
+✓ правильно:
+
+```json
+{
+  "devDependencies": { "@nitra/cspell-dict": "^2.0.0" },
+  "scripts": { "format": "oxfmt --write ." }
+}
+```
+
+✗ неправильно:
+
+```json
+{
+  "prettier": "@nitra/prettier-config",
+  "devDependencies": { "prettier": "^3.0.0", "@nitra/cspell-dict": "^1.0.0" },
+  "scripts": { "fix": "bunx prettier --write ." }
+}
+```
+
+## Перевірка `.vscode/extensions.json` — канонічні розширення
+
+Rego-пакет: `text.vscode_extensions`
+
+Цільовий файл: `.vscode/extensions.json`
+
+**Що перевіряється:**
+
+- `recommendations` має бути надмножиною канонічного списку розширень
+
+Канонічний snippet: [extensions.json.snippet.json](./template/extensions.json.snippet.json)
+
+Обов'язкові розширення: `DavidAnson.vscode-markdownlint`, `oxc.oxc-vscode`, `timonwong.shellcheck`
+
+## Перевірка `.vscode/settings.json` — налаштування редактора
+
+Rego-пакет: `text.vscode_settings`
+
+Цільовий файл: `.vscode/settings.json`
+
+**Що перевіряється (generic walker по канонічному snippet):**
+
+- Scalar leafs: `editor.formatOnSave` має бути `true`
+- Об'єктні блоки мовних налаштувань `[javascript]`, `[typescript]`, `[json]`, `[vue]`, `[css]`, `[html]`: `editor.defaultFormatter` має бути `"oxc.oxc-vscode"`
+- Якщо блок відсутній або не є об'єктом — deny
+
+Канонічний snippet: [settings.json.snippet.json](./template/settings.json.snippet.json)
