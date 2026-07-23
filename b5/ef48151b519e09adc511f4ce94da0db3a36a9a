@@ -1,0 +1,22 @@
+docs/specs/2026-07-23-mt-cli-rust.md
+  s_cf37950fa51143::t_d8408cbc09250e 75
+  s_cf37950fa51143::t_5c208906d57c35 1-38,41,48-74,76-91,93,102-105,108-111
+  s_cf37950fa51143::t_efa5187cb8e502 92,94-101,106-107
+  s_cf37950fa51143::t_68a415b1ad2566 39-40,42-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b5ef48151b519e09adc511f4ce94da0db3a36a9a",
+  "prompts": {},
+  "sessions": {
+    "s_cf37950fa51143": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c53ebd54-ae78-4848-a72d-6b1b9ef1ddae",
+        "model": "claude-fable-5"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
