@@ -15,6 +15,7 @@
     "layers": "bun ./layers/lib/cli.mjs"
   },
   "devDependencies": {
+    "@7n/mt": "^0.30.1",
     "@7n/rules": "^1.36.1",
     "@7n/rules-ci-github": "^1.9.0",
     "@7n/rules-lang-js": "^0.9.0",

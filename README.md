@@ -2,8 +2,19 @@
 
 Повна реалізація протоколу MT (задачний граф + agent-протокол) на Rust.
 
-- Специфікація протоколу: [github.com/nitra/mt](https://github.com/nitra/mt)
-- Тонкий JS-клієнт (npm-пакет `@7n/mt`): [github.com/nitra/mt-js](https://github.com/nitra/mt-js)
+- Специфікація протоколу: [github.com/nitra/mt](https://github.com/nitra/mt) — публікується в npm як `@7n/mt` (з 0.29.0; версії ≤0.28.0 — це старий CLI)
+- JS-клієнт (код CLI, наразі не публікується): [github.com/nitra/mt-js](https://github.com/nitra/mt-js)
+
+## Специфікація в цьому репозиторії
+
+Пакет `@7n/mt` (сама специфікація, не CLI) підключений як `devDependency` — після
+`bun install` вона читабельна на диску без окремого клонування:
+
+```sh
+cat node_modules/@7n/mt/docs/index.md
+```
+
+Оновлюється звичайним бампом версії в кореневому `package.json`.
 
 ## Карта крейтів (`crates/`)
 
