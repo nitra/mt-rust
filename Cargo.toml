@@ -7,6 +7,7 @@ members = [
   "crates/mt-core",
   "crates/mt-cli",
   "crates/mt-napi",
+  "crates/mt-protocol-check",
 ]
 resolver = "2"
 

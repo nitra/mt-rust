@@ -629,6 +629,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
+
+[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -754,6 +760,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "include_dir"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
+dependencies = [
+ "glob",
+ "include_dir_macros",
+]
+
+[[package]]
+name = "include_dir_macros"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -871,6 +897,21 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "serde_json",
+]
+
+[[package]]
+name = "mt-protocol"
+version = "0.1.0"
+source = "git+https://github.com/nitra/mt?branch=claude%2Fmt-protocol-crate#498b7e24c7e2f72af94f47e26008527d97cbdc71"
+dependencies = [
+ "include_dir",
+]
+
+[[package]]
+name = "mt-protocol-check"
+version = "0.1.0"
+dependencies = [
+ "mt-protocol",
 ]
 
 [[package]]

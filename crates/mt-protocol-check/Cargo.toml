@@ -1,0 +1,12 @@
+[package]
+name = "mt-protocol-check"
+description = "Smoke-тест wiring: підтверджує, що git-залежність mt-protocol (nitra/mt) резолвиться, компілюється і контент docs/ доступний"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# TODO: перевести на main/тег після мерджу nitra/mt#62
+mt-protocol = { git = "https://github.com/nitra/mt", branch = "claude/mt-protocol-crate" }
