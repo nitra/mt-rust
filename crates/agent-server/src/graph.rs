@@ -523,7 +523,7 @@ mod tests {
         // Вузол із Check: вимагає файл ready у директорії вузла.
         std::fs::write(
             fixture.work.path().join("mt/demo/task.md"),
-            "## Task\n\n## Check\n\ntest -f mt/demo/ready\n",
+            "## Task\n\n## Check\n\ntest -f ready\n",
         )
         .unwrap();
         sh(fixture.work.path(), &["add", "."]);
