@@ -91,3 +91,85 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${GITHUB_REF_NAME}" release/* --generate-notes
+
+  # ── Автооновлення формули mt у tap nitra/homebrew-7n ───────────────────────────
+  update-homebrew-tap:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout цього репо не потрібен, лише tap-репо через PAT
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Compute version and checksums
+        id: meta
+        run: |
+          echo "version=${GITHUB_REF_NAME#mt-v}" >> "$GITHUB_OUTPUT"
+          echo "sha_darwin_arm64=$(shasum -a 256 dist/mt-darwin-arm64/mt-darwin-arm64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha_linux_x64=$(shasum -a 256 dist/mt-linux-x64/mt-linux-x64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout homebrew-7n
+        uses: actions/checkout@v6
+        with:
+          repository: nitra/homebrew-7n
+          token: ${{ secrets.HOMEBREW_TAP_PAT }}
+          path: tap
+          persist-credentials: true
+
+      - name: Update formula
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          SHA_DARWIN: ${{ steps.meta.outputs.sha_darwin_arm64 }}
+          SHA_LINUX: ${{ steps.meta.outputs.sha_linux_x64 }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > tap/Formula/mt.rb <<EOF
+          class Mt < Formula
+            desc "mt CLI — задачний граф @7n/mt"
+            homepage "https://github.com/nitra/mt-rust"
+            version "${VERSION}"
+            license "ISC"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/nitra/mt-rust/releases/download/${TAG}/mt-darwin-arm64"
+                sha256 "${SHA_DARWIN}"
+
+                def install
+                  bin.install "mt-darwin-arm64" => "mt"
+                end
+              else
+                odie "mt: інтел-мак поки не підтримується (немає x86_64-apple-darwin ассету в релізах mt-rust)"
+              end
+            end
+
+            on_linux do
+              url "https://github.com/nitra/mt-rust/releases/download/${TAG}/mt-linux-x64"
+              sha256 "${SHA_LINUX}"
+
+              def install
+                bin.install "mt-linux-x64" => "mt"
+              end
+            end
+
+            test do
+              system "#{bin}/mt", "--help"
+            end
+          end
+          EOF
+
+      - name: Commit and push
+        working-directory: tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/mt.rb
+          if git diff --cached --quiet; then
+            echo "Formula already up to date"
+            exit 0
+          fi
+          git commit -m "mt ${{ steps.meta.outputs.version }}"
+          git push
