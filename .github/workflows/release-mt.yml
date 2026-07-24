@@ -90,7 +90,7 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" release/* --generate-notes
+        run: gh release create "${GITHUB_REF_NAME}" release/* --repo "${GITHUB_REPOSITORY}" --generate-notes
 
   # ── Автооновлення формули mt у tap nitra/homebrew-7n ───────────────────────────
   update-homebrew-tap:
