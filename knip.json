@@ -31,10 +31,6 @@
         ".pi/extensions/**/index.ts"
       ]
     },
-    "crates/mt-napi": {
-      "entry": ["stryker.config.mjs", "**/*.test.{js,mjs}"],
-      "project": ["**/*.{js,mjs}"]
-    },
     "relay": {
       "entry": ["lib/relay.mjs", "stryker.config.mjs", "**/*.test.{js,mjs}"],
       "project": ["**/*.{js,mjs}"]

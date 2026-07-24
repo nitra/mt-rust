@@ -4,16 +4,6 @@ dist/
 # Rust build artifacts
 target/
 
-# Prebuilt scanner binaries are produced by CI, never committed
-packages/*/mt-scanner
-packages/*/mt-scanner.exe
-
-# napi addon artifacts (napi build / CI), never committed
-crates/mt-napi/*.node
-crates/mt-napi/index.js
-crates/mt-napi/index.d.ts
-packages/*/*.node
-
 *.secret
 
 .claude/hooks/*.log

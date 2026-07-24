@@ -4,8 +4,7 @@
   "private": true,
   "workspaces": [
     "relay",
-    "layers",
-    "crates/mt-napi"
+    "layers"
   ],
   "type": "module",
   "scripts": {

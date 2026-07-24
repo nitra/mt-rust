@@ -1057,6 +1057,36 @@ pub fn create_task(
     result
 }
 
+/// Пише новий `plan_NNN.md` (NNN = max+1) — чернетка для виконавця: `decision:
+/// atomic` за замовчуванням (перепишеться на `composite` разом із `##
+/// Children`, якщо декомпозиція потрібна), опційний `mode:` override.
+/// Повертає ім'я записаного файлу.
+pub fn write_plan_draft(
+    tasks_dir: &str,
+    node_path: &str,
+    mode: Option<&str>,
+) -> Result<String, String> {
+    validate_name(node_path)?;
+    let dir = PathBuf::from(tasks_dir).join(node_path);
+    if !dir.join("task.md").is_file() {
+        return Err(format!("node not found: {node_path}"));
+    }
+    let files: Vec<String> = fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    let nnn = nnn::next_plan_nnn(&files);
+    let plan_file = format!("plan_{nnn}.md");
+    let created_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let mode_line = mode.map(|m| format!("mode: {m}\n")).unwrap_or_default();
+    let content = format!(
+        "---\nschema_version: 1\ncreated_at: {created_at}\ndecision: atomic\n{mode_line}---\n\n## Context\n\n<!-- контекст рішення: чому atomic/composite -->\n\n## Children\n\n<!-- лише для decision: composite — див. спеку «Протокол spawn» -->\n\n## Risks\n\n<!-- ризики виконання -->\n"
+    );
+    write_atomic(&dir.join(&plan_file), &content)?;
+    Ok(plan_file)
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────────
 // Reproduce the authoritative cases from npm/lib/tests/state.test.mjs (the JS suite
 // these replace), plus worktree→running and sanitize vectors.
@@ -1642,5 +1672,31 @@ mod tests {
     fn create_rejects_traversal_name() {
         let (_root, mt) = create_repo(None);
         assert!(create_task(mt, "../escape".to_string(), CreateOpts::default()).is_err());
+    }
+
+    // ── write_plan_draft ──
+
+    #[test]
+    fn write_plan_draft_writes_first_and_next_nnn() {
+        let (root, mt) = create_repo(None);
+        create_task(mt.clone(), "demo".to_string(), CreateOpts::default()).unwrap();
+        let file = write_plan_draft(&mt, "demo", None).unwrap();
+        assert_eq!(file, "plan_001.md");
+        let content = fs::read_to_string(root.path().join("mt/demo").join(&file)).unwrap();
+        assert!(content.starts_with("---\nschema_version: 1\n"));
+        assert!(content.contains("decision: atomic"));
+        assert!(!content.contains("mode:"));
+        assert!(content.contains("## Children"));
+
+        let file2 = write_plan_draft(&mt, "demo", Some("agent")).unwrap();
+        assert_eq!(file2, "plan_002.md");
+        let content2 = fs::read_to_string(root.path().join("mt/demo").join(&file2)).unwrap();
+        assert!(content2.contains("mode: agent"));
+    }
+
+    #[test]
+    fn write_plan_draft_missing_node_errors() {
+        let (_root, mt) = create_repo(None);
+        assert!(write_plan_draft(&mt, "nope", None).is_err());
     }
 }
