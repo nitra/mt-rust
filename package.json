@@ -10,7 +10,7 @@
   "scripts": {
     "test": "bunx --bun vitest run",
     "oxfmt": "oxfmt .",
-    "coverage": "npx @7n/test coverage",
+    "coverage": "npx @7n/rules lint test --no-fix",
     "layers": "bun ./layers/lib/cli.mjs"
   },
   "devDependencies": {
