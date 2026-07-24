@@ -1,0 +1,92 @@
+name: Release mt
+
+on:
+  push:
+    tags:
+      - 'mt-v*'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions: {} # deny-all за замовчуванням; кожен job оголошує потрібне
+
+jobs:
+  # ── Збірка бінарника `mt` для GitHub Releases (без npm — спека 2026-07-23-mt-cli-rust.md) ──
+  build:
+    permissions:
+      contents: read # лише checkout; артефакти йдуть через runtime-токен
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-14 # native Apple Silicon
+            target: aarch64-apple-darwin
+            asset: mt-darwin-arm64
+            zig: false
+          - os: ubuntu-latest # static musl через cargo-zigbuild
+            target: x86_64-unknown-linux-musl
+            asset: mt-linux-x64
+            zig: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false # build-only, токен не потрібен
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-zigbuild (Linux musl)
+        if: ${{ matrix.zig }}
+        run: |
+          pip install ziglang
+          cargo install --locked cargo-zigbuild
+
+      - name: Build mt (zigbuild)
+        if: ${{ matrix.zig }}
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p mt
+
+      - name: Build mt (native)
+        if: ${{ !matrix.zig }}
+        run: cargo build --release --target ${{ matrix.target }} -p mt
+
+      - name: Stage binary
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/mt" "dist/${{ matrix.asset }}"
+          chmod +x "dist/${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  # ── Публікація бінарників як GitHub Release assets ────────────────────────────
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # створення релізу + upload assets
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist # → dist/<asset>/<asset>
+
+      - name: Flatten artifact layout
+        run: |
+          mkdir -p release
+          cp dist/mt-darwin-arm64/mt-darwin-arm64 release/
+          cp dist/mt-linux-x64/mt-linux-x64 release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
