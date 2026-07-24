@@ -40,6 +40,8 @@ jobs:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          lookup-only: true # release з тегу: не restore/save shared cache (zizmor cache-poisoning)
 
       - name: Install cargo-zigbuild (Linux musl)
         if: ${{ matrix.zig }}
@@ -86,7 +88,6 @@ jobs:
           cp dist/mt-linux-x64/mt-linux-x64 release/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" release/* --generate-notes

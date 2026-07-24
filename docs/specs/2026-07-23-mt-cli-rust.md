@@ -9,6 +9,7 @@
 Старий JS CLI `@7n/mt` (команди `setup/init/plan/verify/run/status/scan/watch/audit/done/failed/spawn/invalidate/kill/worktree`) переїхав із `nitra/mt` у `nitra/mt-js` і з версії 0.29.0 не публікується в npm — dogfood-граф задач у `mt-rust/mt/` лишився без повноцінного CLI. Наявний `crates/mt-cli` (бінарник `mt-scanner`) вміє лише `scan`/`workspaces`/`create` — тонкий транзиційний шар, задокументований у власному `Cargo.toml` як тимчасовий до переходу на napi-аддон.
 
 Мета — новий `mt` CLI, написаний на Rust і покладений у `mt-rust`, що:
+
 - розблоковує dogfood (`mt-rust/mt/`) без залежності від JS/napi;
 - прибирає napi/subprocess-посередників — CLI лінкується на `mt-core` напряму;
 - ревізує командну поверхню старого CLI там, де семантика це виправдовує, а не копіює 1:1.
