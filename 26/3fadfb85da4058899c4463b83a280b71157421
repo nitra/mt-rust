@@ -1,0 +1,102 @@
+docs/specs/2026-07-23-mt-cli-rust.md
+  s_cf37950fa51143::t_d8408cbc09250e 76
+  s_cf37950fa51143::t_5c208906d57c35 1-11,13-39,42,49-75,77-92,94,103-106,109-112
+  s_cf37950fa51143::t_efa5187cb8e502 93,95-102,107-108
+  s_cf37950fa51143::t_68a415b1ad2566 40-41,43-48
+  s_cf37950fa51143::t_e6b8f831767b88 12
+crates/mt/src/output.rs
+  s_cf37950fa51143::t_916d98f6cb7d6b 1-33
+crates/mt/src/commands/check.rs
+  s_cf37950fa51143::t_fcbfc7862322bd 1-86
+package.json
+  s_cf37950fa51143::t_6c12d1d44f2db6 7
+crates/mt/Cargo.toml
+  s_cf37950fa51143::t_4600e6187700c1 1-16,18-22
+  s_cf37950fa51143::t_33e4b32b60fe33 17
+crates/mt/src/commands/mod.rs
+  s_cf37950fa51143::t_9f2a5393e20ce6 1-9
+crates/mt/src/commands/doctor.rs
+  s_cf37950fa51143::t_55192eacd5285f 1-72
+.github/workflows/release-mt.yml
+  s_cf37950fa51143::t_f70a88440be8ce 1-42,45-90
+  s_cf37950fa51143::t_1f1337eea23800 91-92
+  s_cf37950fa51143::t_fc037bf4a70e13 43
+  s_cf37950fa51143::t_5ffcdb473beba3 44
+  s_cf37950fa51143::t_aec4734aa7c948 93
+crates/mt/src/commands/run.rs
+  s_cf37950fa51143::t_4d2ea2118d23b7 1-45
+crates/mt-core/src/lib.rs
+  s_cf37950fa51143::t_92ad0554034326 1676-1701
+  s_cf37950fa51143::t_e0d7ce87f1f17a 1060-1063,1069-1089
+  s_cf37950fa51143::t_6966500e46df4b 1064-1068
+crates/mt/src/context.rs
+  s_cf37950fa51143::t_90f98d140360e7 83-140
+  s_cf37950fa51143::t_e98c28dd44b03c 40-45,48
+  s_cf37950fa51143::t_707d3c7f600a63 1-11,13-20,25-39,46-47,49-67,71-82
+  s_cf37950fa51143::t_d7ba37bad7efcc 12
+  s_cf37950fa51143::t_6966500e46df4b 68-70
+  s_cf37950fa51143::t_6b588c5ed699c1 21-24
+crates/mt/src/main.rs
+  s_cf37950fa51143::t_cd184d73a17c62 1-95,97-104
+  s_cf37950fa51143::t_6966500e46df4b 96
+Cargo.toml
+  s_cf37950fa51143::t_6c94bb78239d3f 7
+  s_cf37950fa51143::t_417348ef17f806 34
+crates/mt/src/commands/plan.rs
+  s_cf37950fa51143::t_17482b9a4b38a7 1-74
+crates/mt/src/commands/worktree.rs
+  s_cf37950fa51143::t_b9fd3e3518a91e 1-5,9-124
+  s_cf37950fa51143::t_6966500e46df4b 6-8
+crates/mt/src/commands/task.rs
+  s_cf37950fa51143::t_802d1ddce9d60a 95-132
+  s_cf37950fa51143::t_29ebe369594894 1-18,20-31,62-63,65-94
+  s_cf37950fa51143::t_35ece8521af90c 19
+  s_cf37950fa51143::t_464709cc94a826 32-61,64
+README.md
+  s_cf37950fa51143::t_275c793ea0640a 6-7
+  s_cf37950fa51143::t_99a52445c1ff05 24-25
+crates/mt/tests/cli.rs
+  s_cf37950fa51143::t_b7ccffa4e1308e 1-111,113-120,122-132,137-173
+  s_cf37950fa51143::t_0f950502ac763b 121
+  s_cf37950fa51143::t_6966500e46df4b 112,133-136
+crates/mt/src/commands/lifecycle.rs
+  s_cf37950fa51143::t_28cd0d79de3f99 1-40
+crates/mt/tests/common/mod.rs
+  s_cf37950fa51143::t_e3cd7138b6259f 1-70
+crates/mt-core/src/worktree.rs
+  s_cf37950fa51143::t_98bcf8b492b8a6 7
+  s_cf37950fa51143::t_ce048b1e5ad768 116-145,157
+  s_cf37950fa51143::t_6966500e46df4b 148-155,184-188,450-451,453,461-462,494-501,512-519,555-556
+  s_cf37950fa51143::t_1faa53baea963e 8-9
+  s_cf37950fa51143::t_4a1d88bef74532 158,160-182,189-281,285-326
+  s_cf37950fa51143::t_41e27966c262ff 183
+  s_cf37950fa51143::t_9ffbb7c0563850 447-449,452,454-460,463-470
+  s_cf37950fa51143::t_9f0aa9bff95c56 445-446,471-493,502-511,520-541,545-549,558
+  s_cf37950fa51143::t_21e2b55a291832 542-544,550-554,557
+  s_cf37950fa51143::t_2c344d8f4f39d2 282-284
+  s_cf37950fa51143::t_89dc02a9b49a0f 159
+crates/mt/src/commands/signal.rs
+  s_cf37950fa51143::t_fd8a3dd8718c39 1-130
+crates/mt/src/commands/graph.rs
+  s_cf37950fa51143::t_607b8ae848966b 1-102
+Cargo.lock
+  s_cf37950fa51143::t_a0b6fc34b63370 302-310,831,834-836,838,840
+bun.lock
+  s_cf37950fa51143::t_d17943b317fae1 1418,2220-2221,2344-2345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "263fadfb85da4058899c4463b83a280b71157421",
+  "prompts": {},
+  "sessions": {
+    "s_cf37950fa51143": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c53ebd54-ae78-4848-a72d-6b1b9ef1ddae",
+        "model": "claude-fable-5"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
