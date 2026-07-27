@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # commit-back bump версії + push тега
+      actions: write # workflow_dispatch release-mt.yml нижче — push тега через GITHUB_TOKEN САМ не тригерить push-подію (anti-recursion guard GH Actions)
     steps:
       - uses: actions/checkout@v6
         with:
@@ -99,3 +100,12 @@ jobs:
           tag="mt-v${{ steps.ver.outputs.version }}"
           git tag "$tag"
           git push origin "$tag"
+
+      # Push тега токеном GITHUB_TOKEN НЕ породжує нову подію `push: tags:` (anti-recursion
+      # guard GH Actions — навмисне обмеження, щоб дії токена не викликали ланцюжок workflow-ів).
+      # release-mt.yml тому сам по собі не запуститься на цей тег — тригеримо явно через API.
+      - name: Trigger release-mt.yml for the new tag
+        if: steps.ver.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run release-mt.yml --repo "${{ github.repository }}" --ref "mt-v${{ steps.ver.outputs.version }}"
