@@ -132,6 +132,12 @@ jobs:
 
       - name: Build mt-napi (zigbuild)
         if: ${{ matrix.zig }}
+        # musl-таргет за замовчуванням fully-static (crt-static) — не підтримує cdylib
+        # ("cannot produce cdylib... does not support these crate types"). napi-аддон
+        # (на відміну від CLI-бінарника вище, якому crt-static якраз потрібен) —
+        # вимикаємо crt-static лише для цього кроку, як і документує сам napi-rs для musl.
+        env:
+          RUSTFLAGS: -C target-feature=-crt-static
         run: cargo zigbuild --release --target ${{ matrix.target }} -p mt-napi
 
       - name: Build mt-napi (native)
