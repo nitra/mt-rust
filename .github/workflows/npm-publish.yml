@@ -99,6 +99,13 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      # OIDC trusted publishing (JS-DevTools/npm-publish README): потребує npm >=11.5.1.
+      # Node 24 з setup-node не гарантовано несе саме цю версію — явно піднімаємо,
+      # інакше публікація падає "need auth" навіть при коректному Trusted Publisher
+      # на боці npmjs.com (живий тест: mt-v0.1.5/0.1.6 — саме ця причина).
+      - name: Upgrade npm for trusted publishing support
+        run: npm install -g npm@^11.5
+
       - name: Download napi addons
         uses: actions/download-artifact@v4
         with:
