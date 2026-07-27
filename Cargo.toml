@@ -6,6 +6,7 @@ members = [
   "crates/agent-server",
   "crates/mt",
   "crates/mt-core",
+  "crates/mt-napi",
 ]
 resolver = "2"
 

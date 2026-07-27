@@ -27,6 +27,22 @@
         "@earendil-works/pi-ai": "0.80.2",
       },
     },
+    "npm/mt-napi": {
+      "name": "@7n/mt-napi",
+      "version": "0.1.1",
+      "optionalDependencies": {
+        "@7n/mt-napi-darwin-arm64": "0.1.1",
+        "@7n/mt-napi-linux-x64": "0.1.1",
+      },
+    },
+    "packages/mt-napi-darwin-arm64": {
+      "name": "@7n/mt-napi-darwin-arm64",
+      "version": "0.1.1",
+    },
+    "packages/mt-napi-linux-x64": {
+      "name": "@7n/mt-napi-linux-x64",
+      "version": "0.1.1",
+    },
     "relay": {
       "name": "@7n/relay",
       "version": "0.8.1",
@@ -52,6 +68,12 @@
     "@7n/mt-darwin-arm64": ["@7n/mt-darwin-arm64@0.5.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-ozofQxbsdrv7cVZJeb9P9MLwzpdNxdqTcmzRQjwSf316TK8ptxzZhU0b24CsoH/Ia98zhbJLBPsdK/ueHWFl4Q=="],
 
     "@7n/mt-linux-x64": ["@7n/mt-linux-x64@0.5.1", "", { "os": "linux", "cpu": "x64" }, "sha512-c4b1c435vfGZcRKkLnWcoKs8O6KTATFFx6gPGnid4ee+JDqzyhtxb5kzxYkcTQySO8iBHPAtUMEOBCHDrF1UjQ=="],
+
+    "@7n/mt-napi": ["@7n/mt-napi@workspace:npm/mt-napi"],
+
+    "@7n/mt-napi-darwin-arm64": ["@7n/mt-napi-darwin-arm64@workspace:packages/mt-napi-darwin-arm64"],
+
+    "@7n/mt-napi-linux-x64": ["@7n/mt-napi-linux-x64@workspace:packages/mt-napi-linux-x64"],
 
     "@7n/relay": ["@7n/relay@workspace:relay"],
 

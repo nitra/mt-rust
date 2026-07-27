@@ -1,0 +1,23 @@
+{
+  "name": "@7n/mt-napi",
+  "version": "0.1.1",
+  "description": "napi-rs біндинг mt-core для Node/Bun-споживачів — worktree/scan/plan/spawn без spawn-виклику CLI",
+  "license": "ISC",
+  "type": "module",
+  "main": "index.mjs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nitra/mt-rust.git"
+  },
+  "files": [
+    "index.mjs",
+    "native.mjs"
+  ],
+  "optionalDependencies": {
+    "@7n/mt-napi-darwin-arm64": "0.1.1",
+    "@7n/mt-napi-linux-x64": "0.1.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
