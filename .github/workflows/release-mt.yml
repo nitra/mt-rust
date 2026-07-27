@@ -92,6 +92,115 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${GITHUB_REF_NAME}" release/* --repo "${GITHUB_REPOSITORY}" --generate-notes
 
+  # ── Збірка napi-аддона `mt` (crates/mt-napi → .node) — docs/specs/2026-07-27-mt-napi-binding.md ──
+  build-napi:
+    permissions:
+      contents: read # лише checkout; артефакти йдуть через runtime-токен
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-14 # native Apple Silicon
+            target: aarch64-apple-darwin
+            napi_suffix: darwin-arm64
+            cdylib: libmt_napi.dylib
+            zig: false
+          - os: ubuntu-latest # static musl через cargo-zigbuild
+            target: x86_64-unknown-linux-musl
+            napi_suffix: linux-x64-musl
+            cdylib: libmt_napi.so
+            zig: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false # build-only, токен не потрібен
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          lookup-only: true # release з тегу: не restore/save shared cache (zizmor cache-poisoning)
+
+      - name: Install cargo-zigbuild (Linux musl)
+        if: ${{ matrix.zig }}
+        run: |
+          pip install ziglang
+          cargo install --locked cargo-zigbuild
+
+      - name: Build mt-napi (zigbuild)
+        if: ${{ matrix.zig }}
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p mt-napi
+
+      - name: Build mt-napi (native)
+        if: ${{ !matrix.zig }}
+        run: cargo build --release --target ${{ matrix.target }} -p mt-napi
+
+      - name: Stage .node addon
+        # napi-rs cdylib є валідним Node native addon незалежно від розширення файлу —
+        # перейменування без окремого napi-CLI кроку (той самий підхід, що й build мт-бінарника вище).
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${{ matrix.cdylib }}" "dist/mt.${{ matrix.napi_suffix }}.node"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt-napi-${{ matrix.napi_suffix }}
+          path: dist/mt.${{ matrix.napi_suffix }}.node
+          if-no-files-found: error
+
+  # ── Публікація napi-платформних пакетів + @7n/mt-napi (npm OIDC/provenance) ───
+  publish-mt-napi:
+    needs: build-napi
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC trusted publishing на npmjs (без NPM_TOKEN)
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download napi addons
+        uses: actions/download-artifact@v4
+        with:
+          path: dist # → dist/mt-napi-<suffix>/mt.<suffix>.node
+
+      - name: Stage addons into platform packages
+        run: |
+          cp dist/mt-napi-darwin-arm64/mt.darwin-arm64.node packages/mt-darwin-arm64/
+          cp dist/mt-napi-linux-x64/mt.linux-x64-musl.node packages/mt-linux-x64/
+
+      - name: Sync platform + main package versions to workspace version
+        run: |
+          VERSION="${GITHUB_REF_NAME#mt-v}"
+          echo "Publishing @7n/mt-napi $VERSION"
+          for pkg in packages/mt-darwin-arm64 packages/mt-linux-x64 npm/mt-napi; do
+            V="$VERSION" node -e "const f=process.argv[1]+'/package.json';const p=require('./'+f);p.version=process.env.V;if(p.optionalDependencies)for(const k of Object.keys(p.optionalDependencies))p.optionalDependencies[k]=process.env.V;require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')" "$pkg"
+          done
+
+      # Платформні пакети — ПЕРЕД головним (його optionalDependencies вже вказують на ці версії).
+      - name: Publish @7n/mt-darwin-arm64
+        uses: JS-DevTools/npm-publish@v4.1.5
+        with:
+          package: packages/mt-darwin-arm64/package.json
+
+      - name: Publish @7n/mt-linux-x64
+        uses: JS-DevTools/npm-publish@v4.1.5
+        with:
+          package: packages/mt-linux-x64/package.json
+
+      - name: Publish @7n/mt-napi
+        uses: JS-DevTools/npm-publish@v4.1.5
+        with:
+          package: npm/mt-napi/package.json
+
   # ── Автооновлення формули mt у tap nitra/homebrew-7n ───────────────────────────
   update-homebrew-tap:
     needs: release
