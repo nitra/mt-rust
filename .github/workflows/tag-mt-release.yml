@@ -1,0 +1,101 @@
+name: Tag mt release
+
+# Повна автоматика: кожен merge у main, що зачіпає crates/**, автоматично
+# бампає workspace-версію (Cargo.toml) і пушить тег mt-v<version> — той
+# самий тег, на який уже реагує release-mt.yml (збірка бінарників, GitHub
+# Release, оновлення Homebrew tap). Без окремого ручного кроку.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch: {}
+
+concurrency:
+  group: tag-mt-release
+  cancel-in-progress: false # ніколи не скасовуй bump/tag на півдорозі
+
+permissions: {} # deny-all за замовчуванням; job оголошує потрібне
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # commit-back bump версії + push тега
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # потрібна повна історія тегів
+          persist-credentials: false # push — через ephemeral remote-url нижче
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Configure git identity + push auth
+        # persist-credentials лишається false (ga-rule, безпека): checkout не зберігає токен.
+        # Job робить commit-back + push тега, тож даємо ephemeral GITHUB_TOKEN явно через remote-url.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+
+      - name: Compute next version
+        id: ver
+        run: |
+          set -euo pipefail
+
+          current=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          latest_tag=$(git tag -l 'mt-v*' | sort -V | tail -1)
+          latest="${latest_tag#mt-v}"
+          latest="${latest:-0.0.0}"
+
+          # Якщо Cargo.toml вже вручну піднято вище останнього тега (PR сам змінив
+          # version) — використовуємо це значення як є: дає minor/major bump через
+          # звичайний diff, без парсингу conventional-commits.
+          highest=$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)
+          if [ "$highest" = "$current" ] && [ "$current" != "$latest" ]; then
+            next="$current"
+          else
+            IFS='.' read -r major minor patch <<< "$latest"
+            next="$major.$minor.$((patch + 1))"
+          fi
+
+          if [ "$next" = "$latest" ]; then
+            echo "версія $next уже затегована (mt-v$next) — нічого робити"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "наступна версія: $next (попередня: $latest)"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "version=$next" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump workspace version
+        if: steps.ver.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          version="${{ steps.ver.outputs.version }}"
+          sed -i "0,/^version = \".*\"/s//version = \"$version\"/" Cargo.toml
+          # Регенерує Cargo.lock (локальні workspace-члени фіксують version у lock-файлі).
+          cargo check --workspace --quiet
+
+      - name: Commit version bump
+        if: steps.ver.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          git add Cargo.toml Cargo.lock
+          if git diff --cached --quiet; then
+            echo "після bump немає діффу — пропускаю коміт"
+          else
+            git commit -m "chore: bump workspace version to ${{ steps.ver.outputs.version }}"
+            git push origin HEAD:main
+          fi
+
+      - name: Tag and push
+        if: steps.ver.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          tag="mt-v${{ steps.ver.outputs.version }}"
+          git tag "$tag"
+          git push origin "$tag"
