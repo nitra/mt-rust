@@ -33,10 +33,12 @@ Node/Bun-споживачі `mt` (найпомітніший приклад — 
 ## 3. Деталі реалізації
 
 **Структура крейтів:**
+
 - Новий крейт `crates/mt-napi` (за зразком видаленого з `mt`, але залежить від `mt-core` цього репозиторію, не від старого `scanner/`).
 - `mt-napi` — тонкий шар: кожна napi-функція викликає відповідну функцію `mt-core`, конвертує результат у типізовану napi-rs структуру (`#[napi(object)]`), помилки — у `napi::Error` з кодом, що відповідає кодам виходу CLI.
 
 **Функції MVP (Кластер 3 сесії):**
+
 - `worktreeCreate(branchSuffix: string, description: string): WorktreeCreateResult`
 - `worktreeRemove(branchArg: string): void`
 - `worktreeStatus(): WorktreeStatus[]`
@@ -47,13 +49,16 @@ Node/Bun-споживачі `mt` (найпомітніший приклад — 
 Точні поля структур узгоджуються з існуючими `commands::worktree`, `commands::graph`, `commands::plan` у `crates/mt/src/commands/` — napi-функції викликають ту саму логіку `mt-core`, яку сьогодні викликають ці CLI-команди (не дублювати бізнес-логіку в `mt-napi`).
 
 **Node/Bun-споживач (`npm`-пакет):**
+
 - `native.mjs`-лоадер: `MT_NATIVE_ADDON` (явний override) → platform-пакет (`@7n/mt-darwin-arm64`/`@7n/mt-linux-x64` через `optionalDependencies`) → fallback на `spawnSync('mt', ...)` (той самий контракт, що й `mt-js/bin/mt.js` сьогодні), якщо жоден `.node`-біндинг не резолвнувся.
 - `auto-worktree.mjs` у `7n-rules` — перший реальний споживач; міграція з `spawnFn('npx', ['@7n/mt', 'worktree', ...])` на виклик napi-функції — окрема задача **після** того, як `mt-napi` опублікований (не входить у цю специфікацію).
 
 **CI/публікація:**
+
 - Новий workflow (за зразком `release-mt.yml` + історичного `npm-publish.yml`): збірка `.node` для `aarch64-apple-darwin` і `x86_64-unknown-linux-musl` через `napi build --release` (або `cargo zigbuild` + `napi-rs` артефакт-скрипт), публікація platform-пакетів, потім головного `@7n/mt-napi` з `optionalDependencies`, все — з `id-token: write` та `--provenance`.
 
 **Edge cases з генерації:**
+
 - Версія `.node`-аддону має бути прибита до версії `mt-core`, щоб уникнути дрейфу поведінки між CLI і napi-шляхом (та сама версійна схема, що й CLI-реліз `mt-v*`).
 - Async-виклики (навіть у MVP-функцій типу `scan`, які можуть бути I/O-важкими на великому графі) — через napi-rs `AsyncTask`/tokio, не синхронний блокуючий виклик, щоб не блокувати Bun event loop навіть без окремого `worker_threads`.
 

@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-const require = createRequire(import.meta.url)
+const nodeRequire = createRequire(import.meta.url)
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const CLI_BIN = join(REPO_ROOT, 'target', 'debug', 'mt')
 const CDYLIB = join(
@@ -31,19 +31,26 @@ const CDYLIB = join(
  * `require()`/Bun-лоадер розпізнає нативний addon лише за розширенням `.node`
  * (той самий контракт, що й production `native.mjs`) — сирий `.dylib`/`.so`
  * Bun намагається розпарсити як JS-текст. Копіюємо у тимчасовий `.node`-файл.
+ * @param {string} cdylibPath шлях до зібраного `libmt_napi.dylib`/`.so`
+ * @returns {Record<string, unknown>} exports аддона
  */
 function loadAddon(cdylibPath) {
   const dest = join(tmpdir(), `mt-napi-contract-${process.pid}.node`)
   copyFileSync(cdylibPath, dest)
-  return require(dest)
+  // Нативний addon: шлях обчислюється (tmpdir()+pid), не зовнішній ввід.
+  return nodeRequire(dest)
 }
 
-const toCamel = s => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+const toCamel = s => s.replaceAll(/_([a-z])/g, (_, c) => c.toUpperCase())
 
-/** Нормалізує CLI-JSON (snake_case, explicit null) до napi-форми (camelCase, undefined-omit). */
+/**
+ * Нормалізує CLI-JSON (snake_case, explicit null) до napi-форми (camelCase, undefined-omit).
+ * @param {unknown} value значення з `JSON.parse` CLI-виводу
+ * @returns {unknown} те саме значення, нормалізоване під napi-конвенції
+ */
 function normalizeCli(value) {
-  if (Array.isArray(value)) return value.map(normalizeCli)
-  if (value === null) return undefined
+  if (Array.isArray(value)) return value.map(v => normalizeCli(v))
+  if (value === null) return
   if (value !== null && typeof value === 'object') {
     const out = {}
     for (const [k, v] of Object.entries(value)) {

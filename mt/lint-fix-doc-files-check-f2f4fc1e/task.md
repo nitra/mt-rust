@@ -21,6 +21,7 @@ npx @7n/rules lint --no-fix --cwd ../.. doc-files
 ## Inputs
 
 Target-файли:
+
 - `crates/mt-core/src/lib.rs`
 - `crates/mt-core/src/worktree.rs`
 - `crates/mt-napi/build.rs`

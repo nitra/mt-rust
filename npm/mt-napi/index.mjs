@@ -12,13 +12,14 @@ import { env as procEnv } from 'node:process'
 
 import { loadNative } from './native.mjs'
 
+/** @returns {string} шлях або ім'я бінарника `mt` для запуску через `spawnSync` */
 function mtBin() {
   return procEnv.MT_BIN || 'mt'
 }
 
 /**
- * @param {string[]} args
- * @param {string | undefined} root
+ * @param {string[]} args аргументи `mt` без `--json`/`--root` (додаються тут)
+ * @param {string | undefined} root значення `--root`, якщо задано
  * @returns {unknown} `JSON.parse`-ований stdout
  */
 function runCliJson(args, root) {
@@ -34,15 +35,15 @@ function runCliJson(args, root) {
   return JSON.parse(result.stdout)
 }
 
-/** @returns {Record<string, unknown> | null} */
+/** @returns {Record<string, unknown> | null} exports napi-аддона, або `null` якщо недоступний */
 function native() {
   return loadNative()
 }
 
 /**
- * @param {string} name
- * @param {{ base?: string, root?: string }} [opts]
- * @returns {{ path: string }}
+ * @param {string} name ім'я worktree (гілка `mt/<name>`)
+ * @param {{ base?: string, root?: string }} [opts] `base` — вихідна гілка (типово `main`), `root` — корінь проєкту
+ * @returns {{ path: string }} шлях до створеного worktree
  */
 export function worktreeCreate(name, opts = {}) {
   const addon = native()
@@ -53,9 +54,9 @@ export function worktreeCreate(name, opts = {}) {
 }
 
 /**
- * @param {string} name
- * @param {{ force?: boolean, root?: string }} [opts]
- * @returns {{ removed: string }}
+ * @param {string} name ім'я worktree для видалення
+ * @param {{ force?: boolean, root?: string }} [opts] `force` — прибрати навіть брудне дерево, `root` — корінь проєкту
+ * @returns {{ removed: string }} шлях видаленого worktree
  */
 export function worktreeRemove(name, opts = {}) {
   const addon = native()
@@ -66,8 +67,8 @@ export function worktreeRemove(name, opts = {}) {
 }
 
 /**
- * @param {{ root?: string }} [opts]
- * @returns {Array<Record<string, unknown>>}
+ * @param {{ root?: string }} [opts] `root` — корінь проєкту
+ * @returns {Array<Record<string, unknown>>} worktree репо: вік, stale-прапор, матч на задачу
  */
 export function worktreeStatus(opts = {}) {
   const addon = native()
@@ -76,8 +77,8 @@ export function worktreeStatus(opts = {}) {
 }
 
 /**
- * @param {{ root?: string }} [opts]
- * @returns {Array<Record<string, unknown>>}
+ * @param {{ root?: string }} [opts] `root` — корінь проєкту
+ * @returns {Array<Record<string, unknown>>} дерево вузлів задач
  */
 export function scan(opts = {}) {
   const addon = native()
@@ -86,9 +87,9 @@ export function scan(opts = {}) {
 }
 
 /**
- * @param {string | undefined} name
- * @param {{ mode?: 'agent' | 'human', root?: string }} [opts]
- * @returns {{ plan_file: string }}
+ * @param {string | undefined} name задача (за замовчуванням — з поточної директорії)
+ * @param {{ mode?: 'agent' | 'human', root?: string }} [opts] `mode` — override виконавця плану, `root` — корінь проєкту
+ * @returns {{ plan_file: string }} ім'я записаного файлу плану
  */
 export function plan(name, opts = {}) {
   const addon = native()
@@ -100,9 +101,9 @@ export function plan(name, opts = {}) {
 }
 
 /**
- * @param {string | undefined} name
- * @param {{ root?: string }} [opts]
- * @returns {{ plan_file: string, nnn: number, decision: string | null, decided: boolean, children: unknown[] }}
+ * @param {string | undefined} name задача (за замовчуванням — з поточної директорії)
+ * @param {{ root?: string }} [opts] `root` — корінь проєкту
+ * @returns {{ plan_file: string, nnn: number, decision: string | null, decided: boolean, children: unknown[] }} read-only стан plan-review
  */
 export function spawnReview(name, opts = {}) {
   const addon = native()
@@ -113,9 +114,9 @@ export function spawnReview(name, opts = {}) {
 }
 
 /**
- * @param {string | undefined} name
- * @param {{ root?: string }} [opts]
- * @returns {{ approved_file: string, children: string[] }}
+ * @param {string | undefined} name задача (за замовчуванням — з поточної директорії)
+ * @param {{ root?: string }} [opts] `root` — корінь проєкту
+ * @returns {{ approved_file: string, children: string[] }} схвалений план і матеріалізовані діти
  */
 export function spawnApprove(name, opts = {}) {
   const addon = native()
@@ -127,10 +128,10 @@ export function spawnApprove(name, opts = {}) {
 }
 
 /**
- * @param {string | undefined} name
- * @param {string} reason
- * @param {{ root?: string }} [opts]
- * @returns {{ rejected_file: string }}
+ * @param {string | undefined} name задача (за замовчуванням — з поточної директорії)
+ * @param {string} reason причина відхилення
+ * @param {{ root?: string }} [opts] `root` — корінь проєкту
+ * @returns {{ rejected_file: string }} ім'я файлу відхилення
  */
 export function spawnReject(name, reason, opts = {}) {
   const addon = native()

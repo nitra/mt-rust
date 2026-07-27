@@ -10,7 +10,7 @@ export default [
       '**/reports/stryker/**'
     ]
   },
-  ...getConfig(),
+  ...getConfig({ node: ['npm/mt-napi'] }),
   // Тест-хелпери не потребують JSDoc. `jsdoc/require-jsdoc` (warning) автофіксом вставляє
   // порожні `/** */` заглушки, які oxlint (`jsdoc/require-param`/`require-returns`, deny)
   // потім відхиляє → `bun run lint` неідемпотентний (oxlint --fix && eslint --fix). Вимикаємо

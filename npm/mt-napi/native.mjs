@@ -68,8 +68,8 @@ export function resolveNativeAddon(deps = {}) {
 /**
  * Кешований доступ до аддона (одне завантаження на процес). `null`, якщо
  * аддон не резолвнувся або `require()` кинув — виклик має впасти на CLI-fallback.
- * @param {{ resolve?: () => string | null, requireFn?: (p: string) => Record<string, unknown> }} [deps]
- * @returns {Record<string, unknown> | null}
+ * @param {{ resolve?: () => string | null, requireFn?: (p: string) => Record<string, unknown> }} [deps] ін'єкції для тестів
+ * @returns {Record<string, unknown> | null} exports аддона, або `null` якщо не резолвнувся/не завантажився
  */
 export function loadNative(deps = {}) {
   if (cached !== null) return cached
