@@ -2,8 +2,9 @@ name: Tag mt release
 
 # Повна автоматика: кожен merge у main, що зачіпає crates/**, автоматично
 # бампає workspace-версію (Cargo.toml) і пушить тег mt-v<version> — той
-# самий тег, на який уже реагує release-mt.yml (збірка бінарників, GitHub
-# Release, оновлення Homebrew tap). Без окремого ручного кроку.
+# самий тег, на який реагують release-mt.yml (збірка бінарників, GitHub
+# Release, оновлення Homebrew tap) і npm-publish.yml (napi-пакети, OIDC).
+# Без окремого ручного кроку.
 
 on:
   push:
@@ -104,8 +105,11 @@ jobs:
       # Push тега токеном GITHUB_TOKEN НЕ породжує нову подію `push: tags:` (anti-recursion
       # guard GH Actions — навмисне обмеження, щоб дії токена не викликали ланцюжок workflow-ів).
       # release-mt.yml тому сам по собі не запуститься на цей тег — тригеримо явно через API.
-      - name: Trigger release-mt.yml for the new tag
+      - name: Trigger release-mt.yml and npm-publish.yml for the new tag
         if: steps.ver.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run release-mt.yml --repo "${{ github.repository }}" --ref "mt-v${{ steps.ver.outputs.version }}"
+        run: |
+          tag="mt-v${{ steps.ver.outputs.version }}"
+          gh workflow run release-mt.yml --repo "${{ github.repository }}" --ref "$tag"
+          gh workflow run npm-publish.yml --repo "${{ github.repository }}" --ref "$tag"
