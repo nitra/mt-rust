@@ -6,8 +6,8 @@
     "relay",
     "layers",
     "npm/mt-napi",
-    "packages/mt-napi-darwin-arm64",
-    "packages/mt-napi-linux-x64"
+    "packages/mt-darwin-arm64",
+    "packages/mt-linux-x64"
   ],
   "type": "module",
   "scripts": {

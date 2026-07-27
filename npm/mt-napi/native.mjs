@@ -22,8 +22,8 @@ const REPO_ROOT = join(HERE, '..', '..')
 
 /** Platform-arch → { platformPackage, napiSuffix }. */
 const TARGETS = {
-  'darwin-arm64': { pkg: '@7n/mt-napi-darwin-arm64', suffix: 'darwin-arm64' },
-  'linux-x64': { pkg: '@7n/mt-napi-linux-x64', suffix: 'linux-x64-musl' }
+  'darwin-arm64': { pkg: '@7n/mt-darwin-arm64', suffix: 'darwin-arm64' },
+  'linux-x64': { pkg: '@7n/mt-linux-x64', suffix: 'linux-x64-musl' }
 }
 
 /** @type {Record<string, unknown> | null} */

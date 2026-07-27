@@ -174,27 +174,27 @@ jobs:
 
       - name: Stage addons into platform packages
         run: |
-          cp dist/mt-napi-darwin-arm64/mt.darwin-arm64.node packages/mt-napi-darwin-arm64/
-          cp dist/mt-napi-linux-x64/mt.linux-x64-musl.node packages/mt-napi-linux-x64/
+          cp dist/mt-napi-darwin-arm64/mt.darwin-arm64.node packages/mt-darwin-arm64/
+          cp dist/mt-napi-linux-x64/mt.linux-x64-musl.node packages/mt-linux-x64/
 
       - name: Sync platform + main package versions to workspace version
         run: |
           VERSION="${GITHUB_REF_NAME#mt-v}"
-          echo "Publishing @7n/mt-napi* $VERSION"
-          for pkg in packages/mt-napi-darwin-arm64 packages/mt-napi-linux-x64 npm/mt-napi; do
+          echo "Publishing @7n/mt-napi $VERSION"
+          for pkg in packages/mt-darwin-arm64 packages/mt-linux-x64 npm/mt-napi; do
             V="$VERSION" node -e "const f=process.argv[1]+'/package.json';const p=require('./'+f);p.version=process.env.V;if(p.optionalDependencies)for(const k of Object.keys(p.optionalDependencies))p.optionalDependencies[k]=process.env.V;require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')" "$pkg"
           done
 
       # Платформні пакети — ПЕРЕД головним (його optionalDependencies вже вказують на ці версії).
-      - name: Publish @7n/mt-napi-darwin-arm64
+      - name: Publish @7n/mt-darwin-arm64
         uses: JS-DevTools/npm-publish@v4.1.5
         with:
-          package: packages/mt-napi-darwin-arm64/package.json
+          package: packages/mt-darwin-arm64/package.json
 
-      - name: Publish @7n/mt-napi-linux-x64
+      - name: Publish @7n/mt-linux-x64
         uses: JS-DevTools/npm-publish@v4.1.5
         with:
-          package: packages/mt-napi-linux-x64/package.json
+          package: packages/mt-linux-x64/package.json
 
       - name: Publish @7n/mt-napi
         uses: JS-DevTools/npm-publish@v4.1.5

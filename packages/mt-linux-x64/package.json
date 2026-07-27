@@ -1,20 +1,23 @@
 {
-  "name": "@7n/mt-napi-darwin-arm64",
+  "name": "@7n/mt-linux-x64",
   "version": "0.1.1",
-  "description": "Prebuilt mt napi-аддон (mt-core) для macOS arm64 (Apple Silicon)",
+  "description": "Prebuilt mt napi-аддон (mt-core) для Linux x86_64 (musl)",
   "license": "ISC",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nitra/mt-rust.git"
   },
   "files": [
-    "mt.darwin-arm64.node"
+    "mt.linux-x64-musl.node"
   ],
   "os": [
-    "darwin"
+    "linux"
   ],
   "cpu": [
-    "arm64"
+    "x64"
+  ],
+  "libc": [
+    "musl"
   ],
   "publishConfig": {
     "access": "public"

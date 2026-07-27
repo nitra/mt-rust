@@ -6,7 +6,7 @@
       "name": "mt-rust-mono",
       "devDependencies": {
         "@7n/mt": "^0.30.1",
-        "@7n/rules": "^1.36.1",
+        "@7n/rules": "^1.43.1",
         "@7n/rules-ci-github": "^1.9.0",
         "@7n/rules-lang-js": "^0.9.0",
         "@7n/rules-lang-rust": "^0.6.1",
@@ -31,16 +31,16 @@
       "name": "@7n/mt-napi",
       "version": "0.1.1",
       "optionalDependencies": {
-        "@7n/mt-napi-darwin-arm64": "0.1.1",
-        "@7n/mt-napi-linux-x64": "0.1.1",
+        "@7n/mt-darwin-arm64": "0.1.1",
+        "@7n/mt-linux-x64": "0.1.1",
       },
     },
-    "packages/mt-napi-darwin-arm64": {
-      "name": "@7n/mt-napi-darwin-arm64",
+    "packages/mt-darwin-arm64": {
+      "name": "@7n/mt-darwin-arm64",
       "version": "0.1.1",
     },
-    "packages/mt-napi-linux-x64": {
-      "name": "@7n/mt-napi-linux-x64",
+    "packages/mt-linux-x64": {
+      "name": "@7n/mt-linux-x64",
       "version": "0.1.1",
     },
     "relay": {
@@ -65,15 +65,11 @@
 
     "@7n/mt": ["@7n/mt@0.30.1", "", {}, "sha512-7/v5jjB53jA/YBaAot2VcIQisSonLuhxDIMx6MutL5ZFaBpf3Fp6uYsP2I3S11++bG6z2yW6yDXnknQVD13xjQ=="],
 
-    "@7n/mt-darwin-arm64": ["@7n/mt-darwin-arm64@0.5.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-ozofQxbsdrv7cVZJeb9P9MLwzpdNxdqTcmzRQjwSf316TK8ptxzZhU0b24CsoH/Ia98zhbJLBPsdK/ueHWFl4Q=="],
+    "@7n/mt-darwin-arm64": ["@7n/mt-darwin-arm64@workspace:packages/mt-darwin-arm64"],
 
-    "@7n/mt-linux-x64": ["@7n/mt-linux-x64@0.5.1", "", { "os": "linux", "cpu": "x64" }, "sha512-c4b1c435vfGZcRKkLnWcoKs8O6KTATFFx6gPGnid4ee+JDqzyhtxb5kzxYkcTQySO8iBHPAtUMEOBCHDrF1UjQ=="],
+    "@7n/mt-linux-x64": ["@7n/mt-linux-x64@workspace:packages/mt-linux-x64"],
 
     "@7n/mt-napi": ["@7n/mt-napi@workspace:npm/mt-napi"],
-
-    "@7n/mt-napi-darwin-arm64": ["@7n/mt-napi-darwin-arm64@workspace:packages/mt-napi-darwin-arm64"],
-
-    "@7n/mt-napi-linux-x64": ["@7n/mt-napi-linux-x64@workspace:packages/mt-napi-linux-x64"],
 
     "@7n/relay": ["@7n/relay@workspace:relay"],
 
@@ -2328,6 +2324,10 @@
     "write-file-atomic/signal-exit": ["signal-exit@4.1.0", "", {}, "sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw=="],
 
     "yargs/string-width": ["string-width@7.2.0", "", { "dependencies": { "emoji-regex": "^10.3.0", "get-east-asian-width": "^1.0.0", "strip-ansi": "^7.1.0" } }, "sha512-tsaTIkKW9b4N+AEj+SVA+WhJzV7/zMhcSu78mLKWSk7cXMOSHsBKFWUs0fWwq8QyK3MgJBQRX6Gbi4kYbdvGkQ=="],
+
+    "@7n/rules/@7n/mt/@7n/mt-darwin-arm64": ["@7n/mt-darwin-arm64@0.5.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-ozofQxbsdrv7cVZJeb9P9MLwzpdNxdqTcmzRQjwSf316TK8ptxzZhU0b24CsoH/Ia98zhbJLBPsdK/ueHWFl4Q=="],
+
+    "@7n/rules/@7n/mt/@7n/mt-linux-x64": ["@7n/mt-linux-x64@0.5.1", "", { "os": "linux", "cpu": "x64" }, "sha512-c4b1c435vfGZcRKkLnWcoKs8O6KTATFFx6gPGnid4ee+JDqzyhtxb5kzxYkcTQySO8iBHPAtUMEOBCHDrF1UjQ=="],
 
     "@babel/helper-compilation-targets/lru-cache/yallist": ["yallist@3.1.1", "", {}, "sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g=="],
 
