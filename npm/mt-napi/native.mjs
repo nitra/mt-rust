@@ -41,7 +41,7 @@ let cached = null
  * }} [deps] ін'єкції для тестів
  * @returns {string | null} шлях до файлу аддона, або `null` якщо не знайдено
  */
-export function resolveNativeAddon(deps = {}) {
+function resolveNativeAddon(deps = {}) {
   const env = deps.env ?? procEnv
   const platform = deps.platform ?? osPlatform
   const arch = deps.arch ?? osArch

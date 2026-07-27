@@ -20,7 +20,7 @@ function mtBin() {
 /**
  * @param {string[]} args аргументи `mt` без `--json`/`--root` (додаються тут)
  * @param {string | undefined} root значення `--root`, якщо задано
- * @returns {unknown} `JSON.parse`-ований stdout
+ * @returns {unknown} результат `JSON.parse` над stdout
  */
 function runCliJson(args, root) {
   const fullArgs = [...args, '--json']
