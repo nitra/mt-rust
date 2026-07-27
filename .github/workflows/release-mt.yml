@@ -181,7 +181,7 @@ jobs:
       - name: Stage addons into platform packages
         run: |
           cp dist/mt-napi-darwin-arm64/mt.darwin-arm64.node packages/mt-darwin-arm64/
-          cp dist/mt-napi-linux-x64/mt.linux-x64-musl.node packages/mt-linux-x64/
+          cp dist/mt-napi-linux-x64-musl/mt.linux-x64-musl.node packages/mt-linux-x64/
 
       - name: Sync platform + main package versions to workspace version
         run: |
