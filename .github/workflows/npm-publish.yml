@@ -109,13 +109,39 @@ jobs:
           cp dist/mt-napi-darwin-arm64/mt.darwin-arm64.node packages/mt-darwin-arm64/
           cp dist/mt-napi-linux-x64-musl/mt.linux-x64-musl.node packages/mt-linux-x64/
 
-      - name: Sync platform + main package versions to workspace version
+      - name: Sync main package version to workspace version
         run: |
           VERSION="${GITHUB_REF_NAME#mt-v}"
           echo "Publishing @7n/mt-napi $VERSION"
-          for pkg in packages/mt-darwin-arm64 packages/mt-linux-x64 npm/mt-napi; do
-            V="$VERSION" node -e "const f=process.argv[1]+'/package.json';const p=require('./'+f);p.version=process.env.V;if(p.optionalDependencies)for(const k of Object.keys(p.optionalDependencies))p.optionalDependencies[k]=process.env.V;require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')" "$pkg"
+          V="$VERSION" node -e "const f='npm/mt-napi/package.json';const p=require('./'+f);p.version=process.env.V;require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')"
+
+      # `@7n/mt-darwin-arm64`/`@7n/mt-linux-x64` — ІМЕНА, успадковані зі старого репо
+      # nitra/mt (там вони бандлили mt-scanner-бінарник + napi-аддон, останній реліз
+      # 0.28.0). Тут вони несуть лише napi-аддон — інший корисний вантаж, тож НЕ
+      # lockstep із workspace-версією mt-core: власний monotonic-лічильник поверх
+      # уже опублікованої версії. Перший napi-only реліз — мінорний bump (0.29.0),
+      # щоб позначити змістовий розрив із форматом 0.28.0; далі — patch++.
+      - name: Compute platform package version (independent of workspace version)
+        id: platform_ver
+        run: |
+          latest=$(npm view @7n/mt-darwin-arm64 version 2>/dev/null || echo "0.28.0")
+          IFS='.' read -r major minor patch <<< "$latest"
+          if [ "$major.$minor" = "0.28" ]; then
+            next="0.29.0"
+          else
+            next="$major.$minor.$((patch + 1))"
+          fi
+          echo "platform version: $latest → $next"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Sync platform package versions
+        env:
+          PLATFORM_VERSION: ${{ steps.platform_ver.outputs.version }}
+        run: |
+          for pkg in packages/mt-darwin-arm64 packages/mt-linux-x64; do
+            V="$PLATFORM_VERSION" node -e "const f=process.argv[1]+'/package.json';const p=require('./'+f);p.version=process.env.V;require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')" "$pkg"
           done
+          node -e "const f='npm/mt-napi/package.json';const p=require('./'+f);for(const k of Object.keys(p.optionalDependencies||{}))p.optionalDependencies[k]=process.env.PLATFORM_VERSION;require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')"
 
       # Платформні пакети — ПЕРЕД головним (його optionalDependencies вже вказують на ці версії).
       - name: Publish @7n/mt-darwin-arm64
