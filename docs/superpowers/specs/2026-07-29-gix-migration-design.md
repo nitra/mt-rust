@@ -60,7 +60,7 @@ mt-core::git
 | Worktree create/remove/prune | `compat` | Зберігає Git адміністративні записи й `--force`. |
 | Rebase result worktree | `compat` | Конфлікт завершує publish, rebase abort виконується. |
 | Fenced atomic publish | `compat` | Один atomic push: `main` update + CAS-delete claim/run refs. |
-| Test fixture Git setup | тимчасово Git CLI, test-only | Не входить у production boundary; окрема наступна міграція, коли gix fixture facade покриє всі сценарії. |
+| Test fixture Git setup | `mt-core/test-support` + `gix` | Створює bare remote/worktree, читає refs/blobs і перевіряє remote advertisement без direct Git CLI. |
 | CI/release shell commands | `gix` або non-Git tooling, де це runtime Rust | GitHub Actions checkout/push release workflow лишається GitHub Actions concern; не є Rust runtime. |
 
 ## Безпека й коректність
@@ -100,7 +100,7 @@ Remote update повертає один із трьох результатів:
    `compat`, доки gix не надає еквівалентну безпечну API.
 4. Перевести worktree inspection, runtime fetch і SHA resolution на gix;
    винести worktree lifecycle, rebase й atomic publish у `compat`.
-5. Застосувати static guard: production crates не можуть містити
+5. Застосувати static guard: жоден Rust-файл у `crates/` не може містити
    `Command::new("git")` поза `git::compat`.
 6. Після кожного оновлення `gix` перевіряти matrix; реалізований upstream API
    переносить відповідну capability з `compat` до native gix та видаляє fallback.
@@ -133,9 +133,10 @@ Rust-продукту.
 
 ## Критерій завершення
 
-У production Rust-коді нема прямого `Command::new("git")`. Усі можливості,
+У Rust-коді нема прямого `Command::new("git")` поза `git::compat`. Усі можливості,
 для яких pinned `gix` 0.86 має еквівалентний безпечний API, реалізовані native
 API. Єдиний production shell-out живе в `mt-core::git::compat`; його allow-list
 охоплює staging/commit, custom-ref CAS, worktree lifecycle, branch config,
-rebase, atomic multi-ref push і локальний fast-forward. Test-only fixtures не
-є частиною production boundary та залишаються окремою міграційною задачею.
+rebase, atomic multi-ref push і локальний fast-forward. Test fixtures доступні
+лише за feature `mt-core/test-support` і використовують gix facade та
+семантичні compat операції, не generic shell-out.

@@ -16,8 +16,8 @@ native реалізацій, точна перевірка pinned `gix` 0.86 п�
 worktree-to-index staging. Їх, разом із worktree lifecycle, rebase і atomic
 multi-ref push, ізольовано в `mt-core::git::compat`; production callers
 працюють виключно через facade. Task 8 static guard виконано для production
-коду. Task 7 (повна заміна test-only Git fixtures) лишається окремим
-follow-up: він не послаблює production boundary.
+коду. Task 7 завершена: `mt-core/test-support` створює gix fixtures, а static
+guard перевіряє весь Rust-код у `crates/`, включно з tests.
 
 ## Global Constraints
 
@@ -343,7 +343,7 @@ Commit: `git add crates/mt-core && git commit -m "refactor(git): isolate unsuppo
 - Produces: `TestRepo::new()` creating bare remote, work repo, initial commit and origin entirely through gix.
 - Removes: test-only generic `git(dir, args)` helpers.
 
-- [ ] **Step 1: Add the global static guard after every caller has migrated**
+- [x] **Step 1: Add the global static guard after every caller has migrated**
 
 ```rust
 #[test]
@@ -352,23 +352,23 @@ fn rust_tests_have_no_direct_git_command() {
 }
 ```
 
-- [ ] **Step 2: Run and confirm current failures**
+- [x] **Step 2: Run and confirm current failures**
 
 Run: `cargo test -p mt-core --test git_boundary`
 
 Expected: FAIL, listing fixture helpers and direct test shell-outs.
 
-- [ ] **Step 3: Replace fixture setup and assertions**
+- [x] **Step 3: Replace fixture setup and assertions**
 
 Create bare repos, initial commits, remotes, branches, object reads and ref assertions through `TestRepo` facade methods. Tests that need unsupported behavior invoke public production `compat` behavior and assert results through gix; they never execute system Git directly.
 
-- [ ] **Step 4: Run workspace tests**
+- [x] **Step 4: Run workspace tests**
 
 Run: `cargo test --workspace`
 
 Expected: PASS with no Rust test invoking `Command::new("git")`.
 
-- [ ] **Step 5: Docs, gate and commit**
+- [x] **Step 5: Docs, gate and commit**
 
 Run: `npx @7n/rules lint doc-files && npx @7n/rules lint changelog`
 
@@ -383,7 +383,7 @@ Commit: `git add crates && git commit -m "test(git): build fixtures through gix"
 **Interfaces:**
 - Produces: permanent capability-matrix test and updated design status with exact compat allow-list.
 
-- [ ] **Step 1: Write final enforcement tests**
+- [x] **Step 1: Write final enforcement tests**
 
 ```rust
 #[test]
@@ -392,7 +392,7 @@ fn compat_is_the_only_git_cli_boundary() { /* source scan */ }
 fn all_native_capabilities_have_gix_contract_coverage() { /* matrix rows */ }
 ```
 
-- [ ] **Step 2: Run enforcement tests and verify initial missing coverage**
+- [x] **Step 2: Run enforcement tests and verify initial missing coverage**
 
 Run: `cargo test -p mt-core --test git_boundary`
 
