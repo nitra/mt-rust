@@ -13,12 +13,13 @@ pub struct WorktreeCreateResult {
     pub path: String,
 }
 
-/// napi-еквівалент `mt worktree create <name> [--base <base>]`.
+/// napi-еквівалент `mt worktree create <name> [--base <base>] [--description <text>]`.
 #[napi]
 pub fn worktree_create(
     name: String,
     base: Option<String>,
     root: Option<String>,
+    description: Option<String>,
 ) -> Result<WorktreeCreateResult> {
     let tasks_dir = resolve_tasks_dir(root.as_deref())?;
     let repo = repo_root(&tasks_dir)?;
@@ -32,6 +33,10 @@ pub fn worktree_create(
     let base = base.unwrap_or_else(|| "main".to_string());
     let path = mt_core::worktree::create_dev_worktree(&repo, &worktrees_dir, &name, &base)
         .map_err(Error::from_reason)?;
+    if let Some(description) = description {
+        mt_core::worktree::set_branch_description(&repo, &format!("mt/{name}"), &description)
+            .map_err(Error::from_reason)?;
+    }
     Ok(WorktreeCreateResult {
         path: path.to_string_lossy().into_owned(),
     })
@@ -74,6 +79,7 @@ pub struct WorktreeStatusItem {
     pub age_min: i64,
     pub stale: bool,
     pub task_path: Option<String>,
+    pub description: Option<String>,
 }
 
 impl From<mt_core::worktree::WorktreeInventoryItem> for WorktreeStatusItem {
@@ -88,6 +94,7 @@ impl From<mt_core::worktree::WorktreeInventoryItem> for WorktreeStatusItem {
             age_min: i.age_min as i64,
             stale: i.stale,
             task_path: i.task_path,
+            description: i.description,
         }
     }
 }
@@ -113,5 +120,33 @@ pub fn worktree_status(root: Option<String>) -> Result<Vec<WorktreeStatusItem>> 
     let stale_min = config["stale_worktree_min"].as_u64().unwrap_or(30);
     let inventory = mt_core::worktree::worktree_inventory(&repo, &task_paths, stale_min)
         .map_err(Error::from_reason)?;
-    Ok(inventory.into_iter().map(WorktreeStatusItem::from).collect())
+    Ok(inventory
+        .into_iter()
+        .map(WorktreeStatusItem::from)
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_item_preserves_branch_description() {
+        let item = WorktreeStatusItem::from(mt_core::worktree::WorktreeInventoryItem {
+            entry: mt_core::worktree::WorktreeEntry {
+                path: "/repo/.worktrees/demo".to_string(),
+                name: "demo".to_string(),
+                head: "deadbeef".to_string(),
+                branch: Some("refs/heads/mt/demo".to_string()),
+                locked: false,
+                prunable: false,
+            },
+            age_min: 1,
+            stale: false,
+            task_path: None,
+            description: Some("lint isolation".to_string()),
+        });
+
+        assert_eq!(item.description.as_deref(), Some("lint isolation"));
+    }
 }

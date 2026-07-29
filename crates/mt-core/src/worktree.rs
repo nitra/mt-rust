@@ -33,6 +33,10 @@ fn worktree_prefix(task_path: &str) -> String {
     sanitize(&task_path.replace('/', "-"))
 }
 
+fn dev_branch(name: &str) -> String {
+    format!("mt/{name}")
+}
+
 /// Ім'я worktree для задачі: `<sanitized-path>-<epoch-сек>`.
 pub fn make_worktree_name(task_path: &str, epoch_sec: u64) -> String {
     format!("{}-{epoch_sec}", worktree_prefix(task_path))
@@ -138,7 +142,7 @@ pub fn create_dev_worktree(
     name: &str,
     base: &str,
 ) -> Result<PathBuf, String> {
-    let branch = format!("mt/{name}");
+    let branch = dev_branch(name);
     let path = worktrees_dir.join(name);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -261,6 +265,71 @@ pub fn list_worktrees(repo_root: &Path) -> Result<Vec<WorktreeEntry>, String> {
     )))
 }
 
+/// Записує локальний опис developer-гілки, який Git зберігає в
+/// `branch.<name>.description` і показує через `git branch --edit-description`.
+pub fn set_branch_description(
+    repo_root: &Path,
+    branch: &str,
+    description: &str,
+) -> Result<(), String> {
+    git(
+        repo_root,
+        &[
+            "config",
+            "--local",
+            &format!("branch.{branch}.description"),
+            description,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Повертає локальний Git-опис гілки; відсутній ключ є штатним `None`.
+pub fn branch_description(repo_root: &Path, branch: &str) -> Result<Option<String>, String> {
+    let key = format!("branch.{branch}.description");
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["config", "--local", "--get", &key])
+        .output()
+        .map_err(|e| format!("git config --get {key}: {e}"))?;
+    if out.status.success() {
+        return Ok(Some(
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        ));
+    }
+    if out.status.code() == Some(1) {
+        return Ok(None);
+    }
+    Err(format!(
+        "git config --get {key}: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    ))
+}
+
+/// Прибирає developer-worktree і гілку, якою володіє саме `mt`: `mt/<name>`.
+/// Інша гілка не видаляється навіть за збігу імені checkout-каталогу.
+pub fn remove_dev_worktree(
+    repo_root: &Path,
+    entry: &WorktreeEntry,
+    name: &str,
+    force: bool,
+) -> Result<(), String> {
+    let branch = dev_branch(name);
+    let expected_ref = format!("refs/heads/{branch}");
+    if entry.branch.as_deref() != Some(expected_ref.as_str()) {
+        return Err(format!(
+            "worktree {} не належить mt-гілці {}; знайдено {}",
+            entry.path,
+            branch,
+            entry.branch.as_deref().unwrap_or("detached HEAD")
+        ));
+    }
+    remove_worktree(repo_root, Path::new(&entry.path), force)?;
+    git(repo_root, &["branch", "-D", &branch])?;
+    Ok(())
+}
+
 /// `mt worktree prune`: `git worktree prune -v` — прибирає адміністративні
 /// записи worktree, чиї директорії видалено вручну. Повертає сирий вивід.
 pub fn prune_worktrees(repo_root: &Path) -> Result<String, String> {
@@ -289,6 +358,7 @@ pub struct WorktreeInventoryItem {
     pub age_min: u64,
     pub stale: bool,
     pub task_path: Option<String>,
+    pub description: Option<String>,
 }
 
 fn dir_age_min(path: &Path) -> Option<u64> {
@@ -305,7 +375,7 @@ pub fn worktree_inventory(
     stale_min: u64,
 ) -> Result<Vec<WorktreeInventoryItem>, String> {
     let entries = list_worktrees(repo_root)?;
-    Ok(entries
+    entries
         .into_iter()
         .map(|entry| {
             let age_min = dir_age_min(Path::new(&entry.path)).unwrap_or(0);
@@ -316,14 +386,22 @@ pub fn worktree_inventory(
                     entry.name == prefix || entry.name.starts_with(&format!("{prefix}-"))
                 })
                 .cloned();
-            WorktreeInventoryItem {
+            let description = entry
+                .branch
+                .as_deref()
+                .and_then(|branch| branch.strip_prefix("refs/heads/"))
+                .map(|branch| branch_description(repo_root, branch))
+                .transpose()?
+                .flatten();
+            Ok(WorktreeInventoryItem {
                 stale: age_min > stale_min,
                 age_min,
                 task_path,
+                description,
                 entry,
-            }
+            })
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]
@@ -465,6 +543,98 @@ mod tests {
         assert!(path.exists());
         remove_worktree(repo.work.path(), &path, true).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn inventory_includes_optional_branch_description() {
+        let repo = TestRepo::new();
+        let worktrees_dir = tempfile::tempdir().unwrap();
+        let _path =
+            create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main").unwrap();
+        set_branch_description(repo.work.path(), "mt/demo", "Ізольований lint").unwrap();
+
+        let inventory = worktree_inventory(repo.work.path(), &[], 10_000).unwrap();
+        let item = inventory
+            .iter()
+            .find(|item| item.entry.name == "demo")
+            .expect("developer worktree is inventoried");
+        assert_eq!(item.description.as_deref(), Some("Ізольований lint"));
+    }
+
+    #[test]
+    fn remove_dev_worktree_deletes_owned_branch_and_description() {
+        let repo = TestRepo::new();
+        let worktrees_dir = tempfile::tempdir().unwrap();
+        let path =
+            create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main").unwrap();
+        set_branch_description(repo.work.path(), "mt/demo", "Ізольований lint").unwrap();
+        let entry = list_worktrees(repo.work.path())
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "demo")
+            .expect("developer worktree entry");
+
+        remove_dev_worktree(repo.work.path(), &entry, "demo", true).unwrap();
+
+        assert!(!path.exists());
+        assert!(branch_description(repo.work.path(), "mt/demo")
+            .unwrap()
+            .is_none());
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.work.path())
+            .args(["show-ref", "--verify", "--quiet", "refs/heads/mt/demo"])
+            .status()
+            .unwrap()
+            .code()
+            .is_some_and(|code| code != 0));
+    }
+
+    #[test]
+    fn remove_dev_worktree_deletes_owned_unmerged_branch_without_force() {
+        let repo = TestRepo::new();
+        let worktrees_dir = tempfile::tempdir().unwrap();
+        let path =
+            create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main").unwrap();
+        std::fs::write(path.join("feature.txt"), "worktree-only change").unwrap();
+        crate::test_support::run(&path, &["add", "feature.txt"]);
+        crate::test_support::run(&path, &["commit", "-m", "feature work"]);
+        let entry = list_worktrees(repo.work.path())
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "demo")
+            .expect("developer worktree entry");
+
+        remove_dev_worktree(repo.work.path(), &entry, "demo", false).unwrap();
+
+        assert!(!path.exists());
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.work.path())
+            .args(["show-ref", "--verify", "--quiet", "refs/heads/mt/demo"])
+            .status()
+            .unwrap()
+            .code()
+            .is_some_and(|code| code != 0));
+    }
+
+    #[test]
+    fn remove_dev_worktree_rejects_foreign_branch_before_removal() {
+        let repo = TestRepo::new();
+        let worktrees_dir = tempfile::tempdir().unwrap();
+        let path =
+            create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main").unwrap();
+        let mut entry = list_worktrees(repo.work.path())
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "demo")
+            .expect("developer worktree entry");
+        entry.branch = Some("refs/heads/foreign".to_string());
+
+        let err = remove_dev_worktree(repo.work.path(), &entry, "demo", true).unwrap_err();
+
+        assert!(err.contains("mt/demo"));
+        assert!(path.exists());
     }
 
     #[test]

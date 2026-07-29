@@ -146,6 +146,47 @@ fn worktree_create_list_remove_round_trip() {
 }
 
 #[test]
+fn worktree_description_is_reported_and_owned_branch_is_removed() {
+    let repo = TestRepo::new();
+    run(repo.work.path(), &["init", "demo"]);
+    let create = run(
+        repo.work.path(),
+        &[
+            "worktree",
+            "create",
+            "devwork",
+            "--description",
+            "lint isolation",
+        ],
+    );
+    assert!(create.status.success(), "{}", stdout(&create));
+
+    let inventory = run(repo.work.path(), &["--json", "worktree", "inventory"]);
+    let entries: serde_json::Value = serde_json::from_str(&stdout(&inventory)).unwrap();
+    assert!(entries
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["name"] == "devwork" && entry["description"] == "lint isolation"));
+
+    let text_inventory = run(repo.work.path(), &["worktree", "inventory"]);
+    assert!(stdout(&text_inventory).contains("description=lint isolation"));
+
+    let remove = run(
+        repo.work.path(),
+        &["worktree", "remove", "devwork", "--force"],
+    );
+    assert!(remove.status.success(), "{}", stdout(&remove));
+    let branch = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo.work.path())
+        .args(["show-ref", "--verify", "--quiet", "refs/heads/mt/devwork"])
+        .status()
+        .unwrap();
+    assert!(!branch.success());
+}
+
+#[test]
 fn spawn_approve_materializes_children_from_plan() {
     let repo = TestRepo::new();
     run(repo.work.path(), &["init", "research", "--mode", "human"]);

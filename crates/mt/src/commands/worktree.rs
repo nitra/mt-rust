@@ -4,7 +4,8 @@ use std::path::Path;
 
 use clap::{Args, Subcommand};
 use mt_core::worktree::{
-    create_dev_worktree, list_worktrees, prune_worktrees, remove_worktree, worktree_inventory,
+    create_dev_worktree, list_worktrees, prune_worktrees, remove_dev_worktree,
+    set_branch_description, worktree_inventory,
 };
 use mt_core::{discover_worktrees, scan_tasks, TaskNode};
 
@@ -24,6 +25,8 @@ pub enum WorktreeAction {
         name: String,
         #[arg(long, default_value = "main")]
         base: String,
+        #[arg(long)]
+        description: Option<String>,
     },
     /// Прибрати worktree за іменем.
     Remove {
@@ -52,7 +55,11 @@ pub fn run(args: WorktreeArgs, json: bool) -> Result<(), String> {
     let config = project_config(&tasks_dir);
 
     match args.action {
-        WorktreeAction::Create { name, base } => {
+        WorktreeAction::Create {
+            name,
+            base,
+            description,
+        } => {
             let worktrees_dir = root.join(
                 config["worktrees_dir"]
                     .as_str()
@@ -60,6 +67,9 @@ pub fn run(args: WorktreeArgs, json: bool) -> Result<(), String> {
                     .trim_start_matches("./"),
             );
             let path = create_dev_worktree(&root, &worktrees_dir, &name, &base)?;
+            if let Some(description) = description {
+                set_branch_description(&root, &format!("mt/{name}"), &description)?;
+            }
             emit(json, &serde_json::json!({ "path": path }), |_| {
                 println!("worktree: {}", path.display());
             });
@@ -70,7 +80,7 @@ pub fn run(args: WorktreeArgs, json: bool) -> Result<(), String> {
                 .iter()
                 .find(|e| e.name == name)
                 .ok_or_else(|| format!("worktree не знайдено: {name}"))?;
-            remove_worktree(&root, Path::new(&entry.path), force)?;
+            remove_dev_worktree(&root, entry, &name, force)?;
             emit(json, &serde_json::json!({ "removed": entry.path }), |_| {
                 println!("removed: {}", entry.path);
             });
@@ -108,13 +118,19 @@ pub fn run(args: WorktreeArgs, json: bool) -> Result<(), String> {
             let inventory = worktree_inventory(&root, &task_paths, stale_min)?;
             emit(json, &inventory, |items| {
                 for i in items {
+                    let description = i
+                        .description
+                        .as_deref()
+                        .map(|value| format!("\tdescription={value}"))
+                        .unwrap_or_default();
                     println!(
-                        "{}\t{}\tage={}m\tstale={}\ttask={}",
+                        "{}\t{}\tage={}m\tstale={}\ttask={}{}",
                         i.entry.name,
                         i.entry.branch.as_deref().unwrap_or("(detached)"),
                         i.age_min,
                         i.stale,
-                        i.task_path.as_deref().unwrap_or("-")
+                        i.task_path.as_deref().unwrap_or("-"),
+                        description,
                     );
                 }
             });
