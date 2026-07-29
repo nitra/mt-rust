@@ -1,0 +1,19 @@
+docs/superpowers/plans/2026-07-29-gix-migration.md
+  s_2cff1b0a0bd54b::t_f8e63dd63abcc0 95,98,105,116,122,124,126,132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "6e4d71bf825ca04336f17bbaeb08dbb526d6ea90",
+  "prompts": {},
+  "sessions": {
+    "s_2cff1b0a0bd54b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabf1-2c1e-7cc2-a532-c78e7e3b7fbd",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
