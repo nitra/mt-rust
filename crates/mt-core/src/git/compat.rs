@@ -151,6 +151,117 @@ pub fn push_head(repo: &Path, refname: &str) -> Result<(), GitError> {
     )))
 }
 
+/// Виконує allow-listed worktree lifecycle porcelain (`add`, `remove`, `list`, `prune`).
+pub fn worktree(repo: &Path, args: &[&str]) -> Result<String, GitError> {
+    if !matches!(args.first(), Some(&"add" | &"remove" | &"list" | &"prune")) {
+        return Err(GitError::from_error(
+            "unsupported compat worktree operation",
+        ));
+    }
+    output(repo, "worktree", args)
+}
+
+/// Видаляє гілку після успішного видалення її worktree.
+pub fn delete_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
+    run(repo, ["branch", "-D", branch])
+}
+
+/// Зберігає локальний опис developer branch.
+pub fn set_branch_description(
+    repo: &Path,
+    branch: &str,
+    description: &str,
+) -> Result<(), GitError> {
+    run(
+        repo,
+        [
+            "config",
+            "--local",
+            &format!("branch.{branch}.description"),
+            description,
+        ],
+    )
+}
+
+/// Читає локальний опис developer branch.
+pub fn branch_description(repo: &Path, branch: &str) -> Result<Option<String>, GitError> {
+    let key = format!("branch.{branch}.description");
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["config", "--local", "--get", &key])
+        .output()
+        .map_err(|error| GitError::from_error(format!("git config: {error}")))?;
+    if out.status.success() {
+        return Ok(Some(
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        ));
+    }
+    if out.status.code() == Some(1) {
+        return Ok(None);
+    }
+    Err(GitError::from_error(format!(
+        "git config: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    )))
+}
+
+/// Rebase-ить worktree на задану базу та прибирає незавершений rebase при помилці.
+pub fn rebase_onto(repo: &Path, base: &str) -> Result<(), GitError> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rebase", base])
+        .output()
+        .map_err(|error| GitError::from_error(format!("git rebase: {error}")))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let message = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rebase", "--abort"])
+        .output();
+    Err(GitError::from_error(format!("git rebase: {message}")))
+}
+
+/// Виконує fenced atomic push; `false` означає очікувану lease rejection.
+pub fn push_atomic(repo: &Path, args: &[&str]) -> Result<bool, GitError> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(|error| GitError::from_error(format!("git push --atomic: {error}")))?;
+    if out.status.success() {
+        return Ok(true);
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if is_lease_rejection(&stderr) {
+        return Ok(false);
+    }
+    Err(GitError::from_error(format!(
+        "git push --atomic: {}",
+        stderr.trim()
+    )))
+}
+
+/// Best-effort fast-forward локальної `main` після успішного publish.
+pub fn fast_forward_main(repo: &Path, result_sha: &str) -> Result<(), GitError> {
+    let branch = output(repo, "rev-parse", &["--abbrev-ref", "HEAD"])?;
+    if branch != "main" {
+        return Ok(());
+    }
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["merge", "--ff-only", result_sha])
+        .output()
+        .map_err(|error| GitError::from_error(format!("git merge --ff-only: {error}")))?;
+    Ok(())
+}
+
 fn is_lease_rejection(stderr: &str) -> bool {
     stderr.contains("stale info")
         || stderr.contains("[rejected]")
@@ -170,6 +281,24 @@ fn run<const N: usize>(repo: &Path, args: [&str; N]) -> Result<(), GitError> {
     } else {
         Err(GitError::from_error(format!(
             "git: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )))
+    }
+}
+
+fn output(repo: &Path, command: &str, args: &[&str]) -> Result<String, GitError> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .arg(command)
+        .args(args)
+        .output()
+        .map_err(|error| GitError::from_error(format!("git {command}: {error}")))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(GitError::from_error(format!(
+            "git {command}: {}",
             String::from_utf8_lossy(&out.stderr).trim()
         )))
     }

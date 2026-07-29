@@ -3,7 +3,6 @@
 //! скрипт», крок 5: detached worktree від зафіксованого `base_sha`).
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
@@ -14,23 +13,6 @@ use crate::{
     git::{compat, RunRef},
     sanitize,
 };
-
-fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
 
 /// Префікс worktree для задачі: `sanitize(task_path.replace('/', '-'))`.
 fn worktree_prefix(task_path: &str) -> String {
@@ -71,16 +53,11 @@ pub fn create_run_worktree(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    git(
+    compat::worktree(
         repo_root,
-        &[
-            "worktree",
-            "add",
-            "--detach",
-            &path.to_string_lossy(),
-            base_sha,
-        ],
-    )?;
+        &["add", "--detach", &path.to_string_lossy(), base_sha],
+    )
+    .map_err(|error| error.to_string())?;
     Ok(path)
 }
 
@@ -114,13 +91,13 @@ pub fn remove_run_worktree(repo_root: &Path, path: &Path) -> Result<(), String> 
 /// run-флоу: `force: false` відмовляє на брудному worktree (git-поведінка за
 /// замовчуванням), `force: true` — примусово (як [`remove_run_worktree`]).
 pub fn remove_worktree(repo_root: &Path, path: &Path, force: bool) -> Result<(), String> {
-    let mut args = vec!["worktree", "remove"];
+    let mut args = vec!["remove"];
     if force {
         args.push("--force");
     }
     let path_str = path.to_string_lossy();
     args.push(&path_str);
-    git(repo_root, &args)?;
+    compat::worktree(repo_root, &args).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -137,17 +114,11 @@ pub fn create_dev_worktree(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    git(
+    compat::worktree(
         repo_root,
-        &[
-            "worktree",
-            "add",
-            "-b",
-            &branch,
-            &path.to_string_lossy(),
-            base,
-        ],
-    )?;
+        &["add", "-b", &branch, &path.to_string_lossy(), base],
+    )
+    .map_err(|error| error.to_string())?;
     Ok(path)
 }
 
@@ -238,21 +209,9 @@ pub fn parse_worktree_entries(output: &str) -> Vec<WorktreeEntry> {
 
 /// `mt worktree list`: усі worktree репо (структуровано, з branch/lock/prune-станом).
 pub fn list_worktrees(repo_root: &Path) -> Result<Vec<WorktreeEntry>, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .args(["worktree", "list", "--porcelain"])
-        .output()
-        .map_err(|e| format!("git worktree list: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git worktree list: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(parse_worktree_entries(&String::from_utf8_lossy(
-        &out.stdout,
-    )))
+    let output =
+        compat::worktree(repo_root, &["list", "--porcelain"]).map_err(|error| error.to_string())?;
+    Ok(parse_worktree_entries(&output))
 }
 
 /// Записує локальний опис developer-гілки, який Git зберігає в
@@ -262,39 +221,13 @@ pub fn set_branch_description(
     branch: &str,
     description: &str,
 ) -> Result<(), String> {
-    git(
-        repo_root,
-        &[
-            "config",
-            "--local",
-            &format!("branch.{branch}.description"),
-            description,
-        ],
-    )?;
-    Ok(())
+    compat::set_branch_description(repo_root, branch, description)
+        .map_err(|error| error.to_string())
 }
 
 /// Повертає локальний Git-опис гілки; відсутній ключ є штатним `None`.
 pub fn branch_description(repo_root: &Path, branch: &str) -> Result<Option<String>, String> {
-    let key = format!("branch.{branch}.description");
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .args(["config", "--local", "--get", &key])
-        .output()
-        .map_err(|e| format!("git config --get {key}: {e}"))?;
-    if out.status.success() {
-        return Ok(Some(
-            String::from_utf8_lossy(&out.stdout).trim().to_string(),
-        ));
-    }
-    if out.status.code() == Some(1) {
-        return Ok(None);
-    }
-    Err(format!(
-        "git config --get {key}: {}",
-        String::from_utf8_lossy(&out.stderr).trim()
-    ))
+    compat::branch_description(repo_root, branch).map_err(|error| error.to_string())
 }
 
 /// Прибирає developer-worktree і гілку, якою володіє саме `mt`: `mt/<name>`.
@@ -316,26 +249,14 @@ pub fn remove_dev_worktree(
         ));
     }
     remove_worktree(repo_root, Path::new(&entry.path), force)?;
-    git(repo_root, &["branch", "-D", &branch])?;
+    compat::delete_branch(repo_root, &branch).map_err(|error| error.to_string())?;
     Ok(())
 }
 
 /// `mt worktree prune`: `git worktree prune -v` — прибирає адміністративні
 /// записи worktree, чиї директорії видалено вручну. Повертає сирий вивід.
 pub fn prune_worktrees(repo_root: &Path) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .args(["worktree", "prune", "-v"])
-        .output()
-        .map_err(|e| format!("git worktree prune: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git worktree prune: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    compat::worktree(repo_root, &["prune", "-v"]).map_err(|error| error.to_string())
 }
 
 /// Один запис `mt worktree inventory`: worktree, вік (за mtime директорії),
