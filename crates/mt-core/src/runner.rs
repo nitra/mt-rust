@@ -506,28 +506,12 @@ fn worktrees_dir_path(repo_root: &Path, config: &serde_json::Value) -> PathBuf {
 /// Комітить усі зміни worktree (fact/run/plan/тощо); "нема що комітити" —
 /// не помилка (виконавець теоретично міг не лишити diff).
 fn commit_worktree(worktree: &Path, message: &str) -> Result<(), String> {
-    git(worktree, &["add", "-A"])?;
-    let status = git(worktree, &["status", "--porcelain"])?;
-    if status.is_empty() {
-        return Ok(());
-    }
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(["commit", "-q", "-m", message])
-        .env("GIT_AUTHOR_NAME", "mt-runner")
-        .env("GIT_AUTHOR_EMAIL", "mt-runner@localhost")
-        .env("GIT_COMMITTER_NAME", "mt-runner")
-        .env("GIT_COMMITTER_EMAIL", "mt-runner@localhost")
-        .output()
-        .map_err(|e| format!("git commit: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git commit: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(())
+    crate::git::GitRepository::open(worktree)
+        .and_then(|repository| {
+            repository.commit_all_if_changed(message, crate::git::SignaturePolicy::Runner)
+        })
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 /// Результат одного спавну під watchdog-ом.

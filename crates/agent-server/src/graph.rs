@@ -17,6 +17,7 @@ use mt_core::claims::{
     acquire_claim, discover_repo_root, node_hash, release_claim, renew_or_takeover_claim,
     tasks_root_relative, ClaimFields, RUN_REF_PREFIX,
 };
+use mt_core::git::{GitRepository, SignaturePolicy};
 use mt_core::publish::{fenced_publish, PublishOutcome, PublishRequest};
 use mt_core::worktree::{create_run_worktree, push_run_ref, remove_run_worktree};
 use serde::{Deserialize, Serialize};
@@ -81,6 +82,14 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
         ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn commit_all(worktree: &Path, message: &str) -> Result<Option<String>, String> {
+    GitRepository::open(worktree)
+        .and_then(|repository| {
+            repository.commit_all_if_changed(message, SignaturePolicy::Configured)
+        })
+        .map_err(|error| error.to_string())
 }
 
 fn iso(ts: chrono::DateTime<Utc>) -> String {
@@ -215,12 +224,9 @@ impl InteractiveRun {
         std::fs::write(nitra_dir.join("session.jsonl"), session_jsonl)
             .map_err(|e| e.to_string())?;
 
-        git(&self.worktree, &["add", "-A"])?;
-        let staged = git(&self.worktree, &["status", "--porcelain"])?;
-        if staged.is_empty() {
+        if commit_all(&self.worktree, message)?.is_none() {
             return Ok(());
         }
-        git(&self.worktree, &["commit", "-q", "-m", message])?;
         push_run_ref(&self.worktree, &self.node_hash, &self.token)
     }
 
@@ -291,19 +297,7 @@ impl InteractiveRun {
         let run_ref_sha = git(&self.worktree, &["rev-parse", "HEAD"])?;
 
         self.write_run_artifacts()?;
-        git(&self.worktree, &["add", "-A"])?;
-        let staged = git(&self.worktree, &["status", "--porcelain"])?;
-        if !staged.is_empty() {
-            git(
-                &self.worktree,
-                &[
-                    "commit",
-                    "-q",
-                    "-m",
-                    &format!("mt: {} run (success)", self.node),
-                ],
-            )?;
-        }
+        commit_all(&self.worktree, &format!("mt: {} run (success)", self.node))?;
         let tracked = git(&self.worktree, &["ls-files", ".nitra"])?;
         if !tracked.is_empty() {
             git(&self.worktree, &["rm", "-r", "-q", "--cached", ".nitra"])?;
@@ -347,14 +341,7 @@ impl InteractiveRun {
         let nnn = mt_core::nnn::pad_nnn(mt_core::signal::next_run_nnn(&dir));
         mt_core::signal::write_run_fm(&dir, &nnn, &self.actor, "handoff", "\n", "")?;
 
-        git(&self.worktree, &["add", "-A"])?;
-        let staged = git(&self.worktree, &["status", "--porcelain"])?;
-        if !staged.is_empty() {
-            git(
-                &self.worktree,
-                &["commit", "-q", "-m", &format!("mt: {} handoff", self.node)],
-            )?;
-        }
+        commit_all(&self.worktree, &format!("mt: {} handoff", self.node))?;
         push_run_ref(&self.worktree, &self.node_hash, &self.token)?;
 
         let ticket = HandoffTicket {

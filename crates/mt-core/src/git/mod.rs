@@ -14,6 +14,15 @@ use std::{
 pub use error::GitError;
 pub use refs::{ClaimRef, RunRef};
 
+/// Policy identity для commit-ів, створених runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignaturePolicy {
+    /// Детермінований identity автономного runner-а.
+    Runner,
+    /// Identity з Git config активного worktree.
+    Configured,
+}
+
 /// Відкритий Git-репозиторій для наступних native `gix` операцій.
 pub struct GitRepository {
     #[allow(dead_code)] // Наступні facade-операції Task 2 споживатимуть handle.
@@ -25,6 +34,22 @@ impl GitRepository {
     pub fn open(path: &Path) -> Result<Self, GitError> {
         let repo = gix::discover(path).map_err(GitError::from_error)?;
         Ok(Self { repo })
+    }
+
+    /// Комітить усі зміни worktree або повертає `None`, якщо змін немає.
+    pub fn commit_all_if_changed(
+        &self,
+        message: &str,
+        signature: SignaturePolicy,
+    ) -> Result<Option<String>, GitError> {
+        let worktree = self.repo_root()?;
+        if !compat::commit_all_if_changed(&worktree, message, signature)? {
+            return Ok(None);
+        }
+        self.repo
+            .head_id()
+            .map_err(GitError::from_error)
+            .map(|id| Some(id.to_string()))
     }
 
     /// Повертає абсолютний шлях робочого дерева репозиторію.

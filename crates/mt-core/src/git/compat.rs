@@ -5,7 +5,53 @@
 
 use std::{path::Path, process::Command};
 
-use super::GitError;
+use super::{GitError, SignaturePolicy};
+
+/// Додає усі зміни до index і створює commit за заданою identity policy.
+/// Повертає `false`, коли worktree чистий після staging.
+pub fn commit_all_if_changed(
+    repo: &Path,
+    message: &str,
+    signature: SignaturePolicy,
+) -> Result<bool, GitError> {
+    run(repo, ["add", "-A"])?;
+    let staged = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["diff", "--cached", "--quiet"])
+        .status()
+        .map_err(|error| GitError::from_error(format!("git diff --cached: {error}")))?;
+    if staged.success() {
+        return Ok(false);
+    }
+    if staged.code() != Some(1) {
+        return Err(GitError::from_error("git diff --cached failed"));
+    }
+
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(repo)
+        .args(["commit", "-q", "-m", message]);
+    if signature == SignaturePolicy::Runner {
+        command
+            .env("GIT_AUTHOR_NAME", "mt-runner")
+            .env("GIT_AUTHOR_EMAIL", "mt-runner@localhost")
+            .env("GIT_COMMITTER_NAME", "mt-runner")
+            .env("GIT_COMMITTER_EMAIL", "mt-runner@localhost");
+    }
+    let out = command
+        .output()
+        .map_err(|error| GitError::from_error(format!("git commit: {error}")))?;
+    if out.status.success() {
+        Ok(true)
+    } else {
+        Err(GitError::from_error(format!(
+            "git commit: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )))
+    }
+}
 
 /// Публікує `new_target` у `refname` лише за очікуваного remote target.
 /// `None` означає create-only ref.
@@ -86,4 +132,21 @@ fn is_lease_rejection(stderr: &str) -> bool {
         || stderr.contains("[rejected]")
         || stderr.contains("already exists")
         || stderr.contains("fetch first")
+}
+
+fn run<const N: usize>(repo: &Path, args: [&str; N]) -> Result<(), GitError> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(|error| GitError::from_error(format!("git: {error}")))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(GitError::from_error(format!(
+            "git: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )))
+    }
 }
