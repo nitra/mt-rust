@@ -3,6 +3,9 @@
 mod error;
 mod refs;
 
+/// Вузькі Git CLI capability, яких pinned `gix` ще не надає.
+pub mod compat;
+
 use std::{
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,

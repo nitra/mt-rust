@@ -8,8 +8,12 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
 use crate::claims::RUN_REF_PREFIX;
-use crate::sanitize;
+use crate::{
+    git::{compat, RunRef},
+    sanitize,
+};
 
 fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
@@ -83,9 +87,8 @@ pub fn create_run_worktree(
 /// Публікує локальний run ref для recovery/handoff (спека, крок 5):
 /// `refs/mt/runs/<node-hash>/<token>` ← поточний HEAD worktree.
 pub fn push_run_ref(repo_root: &Path, node_hash: &str, token: &str) -> Result<(), String> {
-    let refname = format!("{RUN_REF_PREFIX}/{node_hash}/{token}");
-    git(repo_root, &["push", "origin", &format!("HEAD:{refname}")])?;
-    Ok(())
+    let refname = RunRef::new(node_hash, token).map_err(|error| error.to_string())?;
+    compat::push_head(repo_root, refname.as_str()).map_err(|error| error.to_string())
 }
 
 /// Видаляє remote run ref (після успішного publish або при cleanup невдалої
@@ -96,22 +99,9 @@ pub fn delete_run_ref(
     token: &str,
     expected_sha: &str,
 ) -> Result<bool, String> {
-    let refname = format!("{RUN_REF_PREFIX}/{node_hash}/{token}");
-    let lease = format!("--force-with-lease={refname}:{expected_sha}");
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .args(["push", &lease, "origin", &format!(":{refname}")])
-        .output()
-        .map_err(|e| format!("git push --delete run ref: {e}"))?;
-    if out.status.success() {
-        return Ok(true);
-    }
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    if stderr.contains("stale info") || stderr.contains("[rejected]") {
-        return Ok(false);
-    }
-    Err(format!("git push --delete run ref: {}", stderr.trim()))
+    let refname = RunRef::new(node_hash, token).map_err(|error| error.to_string())?;
+    compat::delete_with_expected(repo_root, refname.as_str(), expected_sha)
+        .map_err(|error| error.to_string())
 }
 
 /// Прибирає worktree після завершення спроби (success — завжди; failure —

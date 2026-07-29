@@ -5,14 +5,16 @@
 //! node-hash, читання remote claims через native gix і зіставлення з вузлами.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{frontmatter::parse_yaml, git::GitRepository};
+use crate::{
+    frontmatter::parse_yaml,
+    git::{compat, ClaimRef, GitRepository},
+};
 
 /// Префікс claim refs (дефолт `.mt.json` → `claim_ref_prefix`).
 pub const CLAIM_REF_PREFIX: &str = "refs/mt/claims";
@@ -136,24 +138,6 @@ pub fn parse_claim(node_hash: &str, yaml: &str, grace_sec: i64, now: DateTime<Ut
     }
 }
 
-#[cfg(test)]
-fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
 /// Поля `.mt-claim.yml`, які runner контролює при acquire/renew/takeover.
 pub struct ClaimFields<'a> {
     pub node: &'a str,
@@ -209,38 +193,15 @@ pub struct ClaimPush {
     pub commit_sha: String,
 }
 
-/// Розрізняє "інший runner виграв гонку" (force-with-lease rejection) від
-/// системної помилки (мережа/автентифікація) за текстом stderr git push.
-fn is_lease_rejection(stderr: &str) -> bool {
-    stderr.contains("stale info")
-        || stderr.contains("[rejected]")
-        || stderr.contains("already exists")
-        || stderr.contains("fetch first")
-}
-
 fn push_claim_ref(
     repo: &Path,
     node_hash: &str,
     new_sha: &str,
     expected: Option<&str>,
 ) -> Result<bool, String> {
-    let refname = format!("{CLAIM_REF_PREFIX}/{node_hash}");
-    let lease = format!("--force-with-lease={refname}:{}", expected.unwrap_or(""));
-    let refspec = format!("{new_sha}:{refname}");
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["push", &lease, "origin", &refspec])
-        .output()
-        .map_err(|e| format!("git push claim: {e}"))?;
-    if out.status.success() {
-        return Ok(true);
-    }
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    if is_lease_rejection(&stderr) {
-        return Ok(false);
-    }
-    Err(format!("git push claim: {}", stderr.trim()))
+    let refname = ClaimRef::new(node_hash).map_err(|error| error.to_string())?;
+    compat::push_with_expected(repo, refname.as_str(), new_sha, expected)
+        .map_err(|error| error.to_string())
 }
 
 /// Create-only CAS (спека, крок 3): приймається лише якщо `refs/mt/claims/<hash>`
@@ -279,22 +240,9 @@ pub fn renew_or_takeover_claim(
 /// власник exact `claim_sha`. `accepted: false` не є помилкою: означає, що
 /// claim вже загублено (takeover), publish цього runner-а мав бути fenced.
 pub fn release_claim(repo: &Path, node_hash: &str, claim_sha: &str) -> Result<bool, String> {
-    let refname = format!("{CLAIM_REF_PREFIX}/{node_hash}");
-    let lease = format!("--force-with-lease={refname}:{claim_sha}");
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["push", &lease, "origin", &format!(":{refname}")])
-        .output()
-        .map_err(|e| format!("git push --delete claim: {e}"))?;
-    if out.status.success() {
-        return Ok(true);
-    }
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    if is_lease_rejection(&stderr) {
-        return Ok(false);
-    }
-    Err(format!("git push --delete claim: {}", stderr.trim()))
+    let refname = ClaimRef::new(node_hash).map_err(|error| error.to_string())?;
+    compat::delete_with_expected(repo, refname.as_str(), claim_sha)
+        .map_err(|error| error.to_string())
 }
 
 /// Читає remote claims: `ls-remote` → fetch claim refs → `.mt-claim.yml` з
@@ -445,19 +393,17 @@ mod tests {
             "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
         )
         .unwrap());
-        let ls = git(
+        let ls = output(
             repo.work.path(),
             &["ls-remote", "origin", &format!("{CLAIM_REF_PREFIX}/{hash}")],
-        )
-        .unwrap();
+        );
         assert!(!ls.trim().is_empty());
 
         assert!(release_claim(repo.work.path(), &hash, &claim.commit_sha).unwrap());
-        let ls = git(
+        let ls = output(
             repo.work.path(),
             &["ls-remote", "origin", &format!("{CLAIM_REF_PREFIX}/{hash}")],
-        )
-        .unwrap();
+        );
         assert!(ls.trim().is_empty());
     }
 
