@@ -18,8 +18,9 @@ pub mod publish;
 pub mod runner;
 pub mod signal;
 pub mod spawn;
-#[cfg(test)]
-mod test_support;
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub mod test_support;
 pub mod worktree;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
