@@ -2,17 +2,19 @@
 //!
 //! Ownership вузла живе у GitHub custom refs `refs/mt/claims/<node-hash>`;
 //! claim ref вказує на commit із `.mt-claim.yml`. Модуль дає read-модель:
-//! node-hash, читання remote claims через git CLI і зіставлення з вузлами.
+//! node-hash, читання remote claims через native gix і зіставлення з вузлами.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::frontmatter::parse_yaml;
+use crate::{
+    frontmatter::parse_yaml,
+    git::{compat, ClaimRef, GitRepository},
+};
 
 /// Префікс claim refs (дефолт `.mt.json` → `claim_ref_prefix`).
 pub const CLAIM_REF_PREFIX: &str = "refs/mt/claims";
@@ -42,8 +44,9 @@ pub const RUN_REF_PREFIX: &str = "refs/mt/runs";
 
 /// Git top-level, що містить `tasks_dir` (`git rev-parse --show-toplevel`).
 pub fn discover_repo_root(tasks_dir: &Path) -> Result<PathBuf, String> {
-    let out = git(tasks_dir, &["rev-parse", "--show-toplevel"])?;
-    Ok(PathBuf::from(out.trim()))
+    GitRepository::open(tasks_dir)
+        .and_then(|repository| repository.repo_root())
+        .map_err(|error| error.to_string())
 }
 
 /// Канонічний шлях `tasks_dir` відносно `repo_root`, POSIX-нормалізований
@@ -135,23 +138,6 @@ pub fn parse_claim(node_hash: &str, yaml: &str, grace_sec: i64, now: DateTime<Ut
     }
 }
 
-fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
 /// Поля `.mt-claim.yml`, які runner контролює при acquire/renew/takeover.
 pub struct ClaimFields<'a> {
     pub node: &'a str,
@@ -188,53 +174,15 @@ fn claim_yaml(f: &ClaimFields) -> String {
     )
 }
 
-/// Як [`git`], але пише `stdin` у дочірній процес (для `hash-object`/`mktree`).
-fn git_stdin(repo: &Path, args: &[&str], stdin: &str) -> Result<String, String> {
-    use std::io::Write;
-    use std::process::Stdio;
-
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
-    child
-        .stdin
-        .take()
-        .expect("stdin piped")
-        .write_all(stdin.as_bytes())
-        .map_err(|e| format!("git {}: write stdin: {e}", args.join(" ")))?;
-    let out = child
-        .wait_with_output()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
 /// Пише claim-коміт (blob → tree → commit-tree) без checkout/індексу —
 /// придатне для headless runner без робочого дерева проєкту. `parent` —
 /// `base_sha` для першого claim, попередній claim-коміт для renew/takeover
 /// (спека: «Новий claim commit має parent = попередній claim commit»).
 fn create_claim_commit(repo: &Path, parent: &str, fields: &ClaimFields) -> Result<String, String> {
-    let blob_sha = git_stdin(repo, &["hash-object", "-w", "--stdin"], &claim_yaml(fields))?;
-    let tree_entry = format!("100644 blob {blob_sha}\t.mt-claim.yml\n");
-    let tree_sha = git_stdin(repo, &["mktree"], &tree_entry)?;
     let message = format!("mt: claim {}", fields.node);
-    let commit_sha = git(
-        repo,
-        &["commit-tree", &tree_sha, "-p", parent, "-m", &message],
-    )?;
-    Ok(commit_sha.trim().to_string())
+    GitRepository::open(repo)
+        .and_then(|repository| repository.write_claim_commit(parent, &claim_yaml(fields), &message))
+        .map_err(|error| error.to_string())
 }
 
 /// Підсумок CAS-push claim ref. `accepted: false` — інший runner виграв
@@ -245,38 +193,15 @@ pub struct ClaimPush {
     pub commit_sha: String,
 }
 
-/// Розрізняє "інший runner виграв гонку" (force-with-lease rejection) від
-/// системної помилки (мережа/автентифікація) за текстом stderr git push.
-fn is_lease_rejection(stderr: &str) -> bool {
-    stderr.contains("stale info")
-        || stderr.contains("[rejected]")
-        || stderr.contains("already exists")
-        || stderr.contains("fetch first")
-}
-
 fn push_claim_ref(
     repo: &Path,
     node_hash: &str,
     new_sha: &str,
     expected: Option<&str>,
 ) -> Result<bool, String> {
-    let refname = format!("{CLAIM_REF_PREFIX}/{node_hash}");
-    let lease = format!("--force-with-lease={refname}:{}", expected.unwrap_or(""));
-    let refspec = format!("{new_sha}:{refname}");
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["push", &lease, "origin", &refspec])
-        .output()
-        .map_err(|e| format!("git push claim: {e}"))?;
-    if out.status.success() {
-        return Ok(true);
-    }
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    if is_lease_rejection(&stderr) {
-        return Ok(false);
-    }
-    Err(format!("git push claim: {}", stderr.trim()))
+    let refname = ClaimRef::new(node_hash).map_err(|error| error.to_string())?;
+    compat::push_with_expected(repo, refname.as_str(), new_sha, expected)
+        .map_err(|error| error.to_string())
 }
 
 /// Create-only CAS (спека, крок 3): приймається лише якщо `refs/mt/claims/<hash>`
@@ -315,49 +240,33 @@ pub fn renew_or_takeover_claim(
 /// власник exact `claim_sha`. `accepted: false` не є помилкою: означає, що
 /// claim вже загублено (takeover), publish цього runner-а мав бути fenced.
 pub fn release_claim(repo: &Path, node_hash: &str, claim_sha: &str) -> Result<bool, String> {
-    let refname = format!("{CLAIM_REF_PREFIX}/{node_hash}");
-    let lease = format!("--force-with-lease={refname}:{claim_sha}");
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["push", &lease, "origin", &format!(":{refname}")])
-        .output()
-        .map_err(|e| format!("git push --delete claim: {e}"))?;
-    if out.status.success() {
-        return Ok(true);
-    }
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    if is_lease_rejection(&stderr) {
-        return Ok(false);
-    }
-    Err(format!("git push --delete claim: {}", stderr.trim()))
+    let refname = ClaimRef::new(node_hash).map_err(|error| error.to_string())?;
+    compat::delete_with_expected(repo, refname.as_str(), claim_sha)
+        .map_err(|error| error.to_string())
 }
 
 /// Читає remote claims: `ls-remote` → fetch claim refs → `.mt-claim.yml` з
 /// кожного claim-коміта. `grace_sec` — буфер перед takeover (`claim_grace_sec`).
 pub fn fetch_remote_claims(repo_root: &Path, grace_sec: i64) -> Result<Vec<ClaimInfo>, String> {
-    let ls = git(
-        repo_root,
-        &["ls-remote", "origin", &format!("{CLAIM_REF_PREFIX}/*")],
-    )?;
-    let refs = parse_ls_remote(&ls, CLAIM_REF_PREFIX);
+    let repository = GitRepository::open(repo_root).map_err(|error| error.to_string())?;
+    let refs = repository
+        .fetch_claim_refs()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|(node_hash, sha)| RemoteClaimRef { node_hash, sha })
+        .collect::<Vec<_>>();
     if refs.is_empty() {
         return Ok(Vec::new());
     }
-    // Custom refs не покриваються стандартним refspec — тягнемо явно (спека).
-    git(
-        repo_root,
-        &[
-            "fetch",
-            "--quiet",
-            "origin",
-            &format!("+{CLAIM_REF_PREFIX}/*:{CLAIM_REF_PREFIX}/*"),
-        ],
-    )?;
     let now = Utc::now();
     let mut claims = Vec::new();
     for r in refs {
-        let yaml = git(repo_root, &["show", &format!("{}:.mt-claim.yml", r.sha)])?;
+        let yaml = String::from_utf8(
+            repository
+                .read_blob_at_commit(&r.sha, ".mt-claim.yml")
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| format!("claim YAML is not UTF-8: {error}"))?;
         claims.push(parse_claim(&r.node_hash, &yaml, grace_sec, now));
     }
     Ok(claims)
@@ -366,7 +275,7 @@ pub fn fetch_remote_claims(repo_root: &Path, grace_sec: i64) -> Result<Vec<Claim
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{output, TestRepo};
+    use crate::test_support::{first_parent, remote_ref_exists, TestRepo};
     use chrono::TimeZone;
 
     fn fields<'a>(node: &'a str, token: &'a str, base_sha: &'a str) -> ClaimFields<'a> {
@@ -448,10 +357,7 @@ mod tests {
         assert_ne!(renewed.commit_sha, first.commit_sha);
 
         // Ланцюг claim-комітів: parent нового = попередній claim-коміт (не main).
-        let parent = output(
-            repo.work.path(),
-            &["rev-parse", &format!("{}^", renewed.commit_sha)],
-        );
+        let parent = first_parent(repo.work.path(), &renewed.commit_sha);
         assert_eq!(parent, first.commit_sha);
 
         // Застаріле знання SHA (гонка вже пройшла) → CAS відхиляє.
@@ -484,20 +390,16 @@ mod tests {
             "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
         )
         .unwrap());
-        let ls = git(
+        assert!(remote_ref_exists(
             repo.work.path(),
-            &["ls-remote", "origin", &format!("{CLAIM_REF_PREFIX}/{hash}")],
-        )
-        .unwrap();
-        assert!(!ls.trim().is_empty());
+            &format!("{CLAIM_REF_PREFIX}/{hash}")
+        ));
 
         assert!(release_claim(repo.work.path(), &hash, &claim.commit_sha).unwrap());
-        let ls = git(
+        assert!(!remote_ref_exists(
             repo.work.path(),
-            &["ls-remote", "origin", &format!("{CLAIM_REF_PREFIX}/{hash}")],
-        )
-        .unwrap();
-        assert!(ls.trim().is_empty());
+            &format!("{CLAIM_REF_PREFIX}/{hash}")
+        ));
     }
 
     #[test]
@@ -532,6 +434,14 @@ mod tests {
         assert_eq!(claims[0].node.as_deref(), Some("research/analyze"));
         assert_eq!(claims[0].runner_id.as_deref(), Some("test-runner/1"));
         assert!(!claims[0].expired);
+    }
+
+    #[test]
+    fn fetch_remote_claims_reports_a_missing_origin() {
+        let repo = tempfile::tempdir().unwrap();
+        gix::init(repo.path()).unwrap();
+
+        assert!(fetch_remote_claims(repo.path(), 60).is_err());
     }
 
     #[test]

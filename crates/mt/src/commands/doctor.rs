@@ -36,12 +36,10 @@ pub fn run(_args: DoctorArgs, as_json: bool) -> Result<(), String> {
                     ok: true,
                     detail: root.display().to_string(),
                 });
-                let origin = std::process::Command::new("git")
-                    .arg("-C")
-                    .arg(&root)
-                    .args(["remote", "get-url", "origin"])
-                    .output();
-                let has_origin = origin.map(|o| o.status.success()).unwrap_or(false);
+                let has_origin = mt_core::git::GitRepository::open(&root)
+                    .and_then(|repository| repository.origin_url())
+                    .map(|origin| origin.is_some())
+                    .unwrap_or(false);
                 checks.push(Check {
                     name: "git_origin".to_string(),
                     ok: has_origin,

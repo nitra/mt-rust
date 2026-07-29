@@ -177,13 +177,10 @@ fn worktree_description_is_reported_and_owned_branch_is_removed() {
         &["worktree", "remove", "devwork", "--force"],
     );
     assert!(remove.status.success(), "{}", stdout(&remove));
-    let branch = std::process::Command::new("git")
-        .arg("-C")
-        .arg(repo.work.path())
-        .args(["show-ref", "--verify", "--quiet", "refs/heads/mt/devwork"])
-        .status()
-        .unwrap();
-    assert!(!branch.success());
+    assert!(mt_core::git::GitRepository::open(repo.work.path())
+        .unwrap()
+        .resolve_ref("refs/heads/mt/devwork")
+        .is_err());
 }
 
 #[test]

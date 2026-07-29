@@ -4,36 +4,17 @@
 //! Хід на хості 1 → `handoff_node` → `resume_node` на хості 2 з тим самим
 //! тікетом → журнал успадкований, наступний хід продовжує seq без розривів.
 
-use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
 
 use agent_protocol::{Envelope, Event};
 use agent_server::{serve, AppState, ApprovalGate, GraphConfig, ScriptedTurnRunner, SessionHost};
 use futures::SinkExt;
+use mt_core::test_support::{commit_all, push_head, TestRepo};
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
 mod common;
 use common::{next_json, WsStream};
-
-fn sh(dir: &Path, args: &[&str]) {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "t@t.local")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "t@t.local")
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
 
 /// Bare-origin + робочий клон із вузлом `mt/demo` — спільна координатна
 /// точка «двох хостів» (обидва працюють у тому самому локальному клоні;
@@ -47,19 +28,11 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let origin = tempfile::tempdir().unwrap();
-        sh(origin.path(), &["init", "--bare", "-q", "-b", "main"]);
-        let work = tempfile::tempdir().unwrap();
-        sh(work.path(), &["init", "-q", "-b", "main"]);
+        let TestRepo { origin, work } = TestRepo::new();
         std::fs::create_dir_all(work.path().join("mt/demo")).unwrap();
         std::fs::write(work.path().join("mt/demo/task.md"), "## Task\n").unwrap();
-        sh(work.path(), &["add", "."]);
-        sh(work.path(), &["commit", "-q", "-m", "init"]);
-        sh(
-            work.path(),
-            &["remote", "add", "origin", origin.path().to_str().unwrap()],
-        );
-        sh(work.path(), &["push", "-q", "origin", "main"]);
+        commit_all(work.path(), "add task");
+        push_head(work.path(), "refs/heads/main");
         Self { origin, work }
     }
 

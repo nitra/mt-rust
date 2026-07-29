@@ -10,13 +10,13 @@
 //! git.md: у `main` він не потрапляє ніколи.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use chrono::{Duration, Utc};
 use mt_core::claims::{
     acquire_claim, discover_repo_root, node_hash, release_claim, renew_or_takeover_claim,
     tasks_root_relative, ClaimFields, RUN_REF_PREFIX,
 };
+use mt_core::git::{GitRepository, SignaturePolicy};
 use mt_core::publish::{fenced_publish, PublishOutcome, PublishRequest};
 use mt_core::worktree::{create_run_worktree, push_run_ref, remove_run_worktree};
 use serde::{Deserialize, Serialize};
@@ -66,21 +66,12 @@ pub struct InteractiveRun {
     approvals: Vec<String>,
 }
 
-fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+fn commit_all(worktree: &Path, message: &str) -> Result<Option<String>, String> {
+    GitRepository::open(worktree)
+        .and_then(|repository| {
+            repository.commit_all_if_changed(message, SignaturePolicy::Configured)
+        })
+        .map_err(|error| error.to_string())
 }
 
 fn iso(ts: chrono::DateTime<Utc>) -> String {
@@ -112,24 +103,26 @@ fn attach_impl(
     let tasks_root_rel = tasks_root_relative(&repo_root, &config.tasks_dir)?;
     let hash = node_hash(&tasks_root_rel, node);
 
-    git(&repo_root, &["fetch", "--quiet", "origin", "main"])?;
-    let base_sha = git(&repo_root, &["rev-parse", "origin/main"])?;
+    let repository = GitRepository::open(&repo_root).map_err(|error| error.to_string())?;
+    repository
+        .fetch_refspec("+refs/heads/main:refs/remotes/origin/main")
+        .map_err(|error| error.to_string())?;
+    let base_sha = repository
+        .resolve_ref("refs/remotes/origin/main")
+        .map_err(|error| error.to_string())?;
 
     let worktree_base = match resume_token {
         None => base_sha.clone(),
         Some(old_token) => {
             let old_run_ref = format!("{RUN_REF_PREFIX}/{hash}/{old_token}");
-            git(
-                &repo_root,
-                &[
-                    "fetch",
-                    "--quiet",
-                    "origin",
-                    &format!("+{old_run_ref}:{old_run_ref}"),
-                ],
-            )
-            .map_err(|e| format!("attach-resume: старий run ref {old_run_ref} недоступний: {e}"))?;
-            git(&repo_root, &["rev-parse", &old_run_ref])?
+            repository
+                .fetch_refspec(&format!("+{old_run_ref}:{old_run_ref}"))
+                .map_err(|error| {
+                    format!("attach-resume: старий run ref {old_run_ref} недоступний: {error}")
+                })?;
+            repository.resolve_ref(&old_run_ref).map_err(|error| {
+                format!("attach-resume: старий run ref {old_run_ref} недоступний: {error}")
+            })?
         }
     };
 
@@ -215,12 +208,9 @@ impl InteractiveRun {
         std::fs::write(nitra_dir.join("session.jsonl"), session_jsonl)
             .map_err(|e| e.to_string())?;
 
-        git(&self.worktree, &["add", "-A"])?;
-        let staged = git(&self.worktree, &["status", "--porcelain"])?;
-        if staged.is_empty() {
+        if commit_all(&self.worktree, message)?.is_none() {
             return Ok(());
         }
-        git(&self.worktree, &["commit", "-q", "-m", message])?;
         push_run_ref(&self.worktree, &self.node_hash, &self.token)
     }
 
@@ -288,29 +278,23 @@ impl InteractiveRun {
 
         // Remote run ref стоїть на останньому запушеному ході (HEAD ДО
         // артефакт/strip-комітів) — саме його очікує force-with-lease.
-        let run_ref_sha = git(&self.worktree, &["rev-parse", "HEAD"])?;
+        let run_ref_sha = GitRepository::open(&self.worktree)
+            .and_then(|repository| repository.resolve_ref("HEAD"))
+            .map_err(|error| error.to_string())?;
 
         self.write_run_artifacts()?;
-        git(&self.worktree, &["add", "-A"])?;
-        let staged = git(&self.worktree, &["status", "--porcelain"])?;
-        if !staged.is_empty() {
-            git(
-                &self.worktree,
-                &[
-                    "commit",
-                    "-q",
-                    "-m",
-                    &format!("mt: {} run (success)", self.node),
-                ],
-            )?;
-        }
-        let tracked = git(&self.worktree, &["ls-files", ".nitra"])?;
-        if !tracked.is_empty() {
-            git(&self.worktree, &["rm", "-r", "-q", "--cached", ".nitra"])?;
-            git(
-                &self.worktree,
-                &["commit", "-q", "-m", "mt: strip session artifacts"],
-            )?;
+        commit_all(&self.worktree, &format!("mt: {} run (success)", self.node))?;
+        let repository = GitRepository::open(&self.worktree).map_err(|error| error.to_string())?;
+        if repository
+            .remove_from_index(".nitra")
+            .map_err(|error| error.to_string())?
+        {
+            repository
+                .commit_staged_if_changed(
+                    "mt: strip session artifacts",
+                    SignaturePolicy::Configured,
+                )
+                .map_err(|error| error.to_string())?;
         }
         let request = PublishRequest {
             worktree: &self.worktree,
@@ -347,14 +331,7 @@ impl InteractiveRun {
         let nnn = mt_core::nnn::pad_nnn(mt_core::signal::next_run_nnn(&dir));
         mt_core::signal::write_run_fm(&dir, &nnn, &self.actor, "handoff", "\n", "")?;
 
-        git(&self.worktree, &["add", "-A"])?;
-        let staged = git(&self.worktree, &["status", "--porcelain"])?;
-        if !staged.is_empty() {
-            git(
-                &self.worktree,
-                &["commit", "-q", "-m", &format!("mt: {} handoff", self.node)],
-            )?;
-        }
+        commit_all(&self.worktree, &format!("mt: {} handoff", self.node))?;
         push_run_ref(&self.worktree, &self.node_hash, &self.token)?;
 
         let ticket = HandoffTicket {
@@ -370,6 +347,7 @@ impl InteractiveRun {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mt_core::test_support::{blob, commit_all, push_head, remote_refs, TestRepo};
 
     /// Герметична фікстура: bare-репо як origin + робочий клон із tasks-
     /// директорією `mt/demo` на `main` (патерн mt-core test_support).
@@ -379,39 +357,13 @@ mod tests {
         work: tempfile::TempDir,
     }
 
-    fn sh(dir: &Path, args: &[&str]) {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "t@t.local")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "t@t.local")
-            .output()
-            .unwrap();
-        assert!(
-            out.status.success(),
-            "git {args:?}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-
     impl Fixture {
         fn new() -> Self {
-            let origin = tempfile::tempdir().unwrap();
-            sh(origin.path(), &["init", "--bare", "-q", "-b", "main"]);
-            let work = tempfile::tempdir().unwrap();
-            sh(work.path(), &["init", "-q", "-b", "main"]);
+            let TestRepo { origin, work } = TestRepo::new();
             std::fs::create_dir_all(work.path().join("mt/demo")).unwrap();
             std::fs::write(work.path().join("mt/demo/task.md"), "## Task\n").unwrap();
-            sh(work.path(), &["add", "."]);
-            sh(work.path(), &["commit", "-q", "-m", "init"]);
-            sh(
-                work.path(),
-                &["remote", "add", "origin", origin.path().to_str().unwrap()],
-            );
-            sh(work.path(), &["push", "-q", "origin", "main"]);
+            commit_all(work.path(), "add task");
+            push_head(work.path(), "refs/heads/main");
             Self { origin, work }
         }
 
@@ -420,7 +372,7 @@ mod tests {
         }
 
         fn remote_refs(&self) -> String {
-            super::git(self.work.path(), &["ls-remote", "origin"]).unwrap()
+            remote_refs(self.work.path()).join("\n")
         }
     }
 
@@ -440,18 +392,15 @@ mod tests {
             refs.contains(&format!("refs/mt/runs/{}/{}", run.node_hash, run.token)),
             "{refs}"
         );
-        let head = super::git(&run.worktree, &["rev-parse", "HEAD"]).unwrap();
+        let head = mt_core::test_support::head(&run.worktree);
         assert_eq!(head, run.base_sha, "worktree від base_sha (origin/main)");
 
         // Claim позначений інтерактивним (0.3.0, ADR 260711-2100).
-        let claim_yaml = super::git(
-            Path::new(fixture.origin.path()),
-            &[
-                "show",
-                &format!("refs/mt/claims/{}:.mt-claim.yml", run.node_hash),
-            ],
-        )
-        .unwrap();
+        let claim_yaml = blob(
+            fixture.origin.path(),
+            &format!("refs/mt/claims/{}", run.node_hash),
+            ".mt-claim.yml",
+        );
         assert!(claim_yaml.contains("interactive: true"), "{claim_yaml}");
     }
 
@@ -478,35 +427,25 @@ mod tests {
 
         // Журнал доїхав у run ref.
         let run_ref = format!("refs/mt/runs/{}/{}", run.node_hash, run.token);
-        let journal = super::git(
-            fixture.work.path(),
-            &["show", &format!("{run_ref}:.nitra/session.jsonl")],
-        );
-        // ls-remote бачить ref, а show читає локальний — worktree пушить
-        // напряму в origin; читаємо з origin.
-        let origin_journal = super::git(
-            Path::new(fixture.origin.path()),
-            &["show", &format!("{run_ref}:.nitra/session.jsonl")],
-        )
-        .unwrap();
-        assert_eq!(origin_journal, "{\"seq\":0}");
-        drop(journal);
+        let origin_journal = blob(fixture.origin.path(), &run_ref, ".nitra/session.jsonl");
+        assert_eq!(origin_journal, "{\"seq\":0}\n");
 
         let node_hash = run.node_hash.clone();
         let outcome = run.done(3, 10).unwrap();
         assert!(outcome.published, "{outcome:?}");
 
         // main просунувся, fact є, .nitra/ немає, claim/run ref прибрані.
-        let main_files = super::git(
-            Path::new(fixture.origin.path()),
-            &["ls-tree", "-r", "--name-only", "main"],
+        assert!(blob(
+            fixture.origin.path(),
+            "refs/heads/main",
+            "mt/demo/fact_001.md"
         )
-        .unwrap();
-        assert!(main_files.contains("mt/demo/fact_001.md"), "{main_files}");
-        assert!(
-            !main_files.contains(".nitra"),
-            ".nitra/ не мусить потрапити у main: {main_files}"
-        );
+        .contains("ok"));
+        let main = mt_core::git::GitRepository::open(fixture.origin.path()).unwrap();
+        let main_sha = main.resolve_ref("refs/heads/main").unwrap();
+        assert!(main
+            .read_blob_at_commit(&main_sha, ".nitra/session.jsonl")
+            .is_err());
         let refs = fixture.remote_refs();
         assert!(
             !refs.contains(&format!("refs/mt/claims/{node_hash}")),
@@ -526,9 +465,8 @@ mod tests {
             "## Task\n\n## Check\n\ntest -f ready\n",
         )
         .unwrap();
-        sh(fixture.work.path(), &["add", "."]);
-        sh(fixture.work.path(), &["commit", "-q", "-m", "check"]);
-        sh(fixture.work.path(), &["push", "-q", "origin", "main"]);
+        commit_all(fixture.work.path(), "check");
+        push_head(fixture.work.path(), "refs/heads/main");
 
         let run = attach(&fixture.config(), "demo").unwrap();
         run.commit_turn("{}\n", "mt: хід").unwrap();
@@ -561,22 +499,22 @@ mod tests {
         let outcome = run.done(3, 10).unwrap();
         assert!(outcome.published, "{outcome:?}");
 
-        let run_md = super::git(
-            Path::new(fixture.origin.path()),
-            &["show", "main:mt/demo/run_001.md"],
-        )
-        .unwrap();
+        let run_md = blob(
+            fixture.origin.path(),
+            "refs/heads/main",
+            "mt/demo/run_001.md",
+        );
         assert!(run_md.starts_with("---\nschema_version: 1"), "{run_md}");
         assert!(run_md.contains("actor: human"), "{run_md}");
         assert!(run_md.contains("result: success"), "{run_md}");
         assert!(run_md.contains("## Approvals"), "{run_md}");
         assert!(run_md.contains("request=req-1"), "{run_md}");
 
-        let fact_md = super::git(
-            Path::new(fixture.origin.path()),
-            &["show", "main:mt/demo/fact_001.md"],
-        )
-        .unwrap();
+        let fact_md = blob(
+            fixture.origin.path(),
+            "refs/heads/main",
+            "mt/demo/fact_001.md",
+        );
         assert!(fact_md.contains("## Summary"), "{fact_md}");
     }
 
@@ -594,11 +532,11 @@ mod tests {
 
         assert!(run.done(3, 10).unwrap().published);
 
-        let fact_md = super::git(
-            Path::new(fixture.origin.path()),
-            &["show", "main:mt/demo/fact_001.md"],
-        )
-        .unwrap();
+        let fact_md = blob(
+            fixture.origin.path(),
+            "refs/heads/main",
+            "mt/demo/fact_001.md",
+        );
         assert!(fact_md.contains("власний fact виконавця"), "{fact_md}");
     }
 
@@ -664,19 +602,11 @@ mod tests {
         let run_ref = format!("refs/mt/runs/{node_hash}/{old_token}");
         assert!(refs.contains(&run_ref), "run ref лишається: {refs}");
 
-        let run_md = super::git(
-            Path::new(fixture.origin.path()),
-            &["show", &format!("{run_ref}:mt/demo/run_001.md")],
-        )
-        .unwrap();
+        let run_md = blob(fixture.origin.path(), &run_ref, "mt/demo/run_001.md");
         assert!(run_md.contains("result: handoff"), "{run_md}");
-        let journal = super::git(
-            Path::new(fixture.origin.path()),
-            &["show", &format!("{run_ref}:.nitra/session.jsonl")],
-        )
-        .unwrap();
+        let journal = blob(fixture.origin.path(), &run_ref, ".nitra/session.jsonl");
         assert_eq!(
-            journal, "{\"seq\":0}",
+            journal, "{\"seq\":0}\n",
             "повний журнал (без checkpoint-стрипу): {journal}"
         );
     }
@@ -755,14 +685,23 @@ mod tests {
 
         // run_001.md — handoff-маркер першого хосту; run_002.md — success
         // від другого. Без розривів NNN попри зміну хоста.
-        let main_files = super::git(
-            Path::new(fixture.origin.path()),
-            &["ls-tree", "-r", "--name-only", "main"],
+        assert!(blob(
+            fixture.origin.path(),
+            "refs/heads/main",
+            "mt/demo/run_002.md"
         )
-        .unwrap();
-        assert!(main_files.contains("mt/demo/run_002.md"), "{main_files}");
-        assert!(main_files.contains("mt/demo/fact_002.md"), "{main_files}");
-        assert!(!main_files.contains(".nitra"), "{main_files}");
+        .contains("result: success"));
+        assert!(blob(
+            fixture.origin.path(),
+            "refs/heads/main",
+            "mt/demo/fact_002.md"
+        )
+        .contains("## Summary"));
+        let main = mt_core::git::GitRepository::open(fixture.origin.path()).unwrap();
+        let main_sha = main.resolve_ref("refs/heads/main").unwrap();
+        assert!(main
+            .read_blob_at_commit(&main_sha, ".nitra/session.jsonl")
+            .is_err());
 
         let refs = fixture.remote_refs();
         assert!(

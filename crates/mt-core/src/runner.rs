@@ -35,6 +35,7 @@ use crate::config::{
     AgentCliEnv,
 };
 use crate::frontmatter::parse_front_matter;
+use crate::git::GitRepository;
 use crate::nnn::pad_nnn;
 use crate::publish::{fenced_publish, PublishRequest};
 use crate::signal::{self, next_run_nnn, write_run_fm};
@@ -458,23 +459,6 @@ fn md_section(text: &str, name: &str) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
 fn iso_now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
@@ -506,28 +490,12 @@ fn worktrees_dir_path(repo_root: &Path, config: &serde_json::Value) -> PathBuf {
 /// Комітить усі зміни worktree (fact/run/plan/тощо); "нема що комітити" —
 /// не помилка (виконавець теоретично міг не лишити diff).
 fn commit_worktree(worktree: &Path, message: &str) -> Result<(), String> {
-    git(worktree, &["add", "-A"])?;
-    let status = git(worktree, &["status", "--porcelain"])?;
-    if status.is_empty() {
-        return Ok(());
-    }
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(["commit", "-q", "-m", message])
-        .env("GIT_AUTHOR_NAME", "mt-runner")
-        .env("GIT_AUTHOR_EMAIL", "mt-runner@localhost")
-        .env("GIT_COMMITTER_NAME", "mt-runner")
-        .env("GIT_COMMITTER_EMAIL", "mt-runner@localhost")
-        .output()
-        .map_err(|e| format!("git commit: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git commit: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(())
+    crate::git::GitRepository::open(worktree)
+        .and_then(|repository| {
+            repository.commit_all_if_changed(message, crate::git::SignaturePolicy::Runner)
+        })
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 /// Результат одного спавну під watchdog-ом.
@@ -639,8 +607,13 @@ pub fn run_node_env(
     let publish_retry_max = fm_u64(&config, "publish_retry_max").unwrap_or(8) as u32;
     let publish_retry_base_ms = fm_u64(&config, "publish_retry_base_ms").unwrap_or(250);
 
-    git(&repo_root, &["fetch", "--quiet", "origin", "main"])?;
-    let base_sha = git(&repo_root, &["rev-parse", "origin/main"])?;
+    let repository = GitRepository::open(&repo_root).map_err(|error| error.to_string())?;
+    repository
+        .fetch_refspec("+refs/heads/main:refs/remotes/origin/main")
+        .map_err(|error| error.to_string())?;
+    let base_sha = repository
+        .resolve_ref("refs/remotes/origin/main")
+        .map_err(|error| error.to_string())?;
 
     let token = fresh_token();
     let runner_id = format!("mt-runner/{}", std::process::id());
@@ -872,9 +845,8 @@ mod tests {
     /// потрібно для `run_node()`: worktree чекаутиться саме з `origin/main`.
     fn node(tmp: &Path, path: &str) {
         node_files_only(tmp, path);
-        crate::test_support::run(tmp, &["add", "."]);
-        crate::test_support::run(tmp, &["commit", "-q", "-m", &format!("add {path}")]);
-        crate::test_support::run(tmp, &["push", "-q", "origin", "main"]);
+        crate::test_support::commit_all(tmp, &format!("add {path}"));
+        crate::test_support::push_head(tmp, "refs/heads/main");
     }
 
     /// Тіло фейкового `claude`, що пише валідний fact поточної спроби
@@ -1037,11 +1009,10 @@ mod tests {
         assert!(!crate::has_running_marker(&root.join("solo")));
 
         // Опубліковано в origin/main: claim/run ref прибрані, коміт на remote.
-        let claims = crate::test_support::output(
+        assert!(!crate::test_support::remote_ref_exists(
             repo.work.path(),
-            &["ls-remote", "origin", "refs/mt/claims/*"],
-        );
-        assert!(claims.is_empty());
+            "refs/mt/claims/00000000000000000000"
+        ));
         // Локальний main (той самий work-клон) підхопив публікацію.
         assert!(root.join("solo/fact_001.md").is_file());
         let run = fs::read_to_string(root.join("solo/run_001.md")).unwrap();
@@ -1095,9 +1066,8 @@ mod tests {
         )
         .unwrap();
         fs::write(dir.join("a.md"), "schema_version: 1\n").unwrap();
-        crate::test_support::run(repo.work.path(), &["add", "."]);
-        crate::test_support::run(repo.work.path(), &["commit", "-q", "-m", "add gated"]);
-        crate::test_support::run(repo.work.path(), &["push", "-q", "origin", "main"]);
+        crate::test_support::commit_all(repo.work.path(), "add gated");
+        crate::test_support::push_head(repo.work.path(), "refs/heads/main");
 
         let r = root.to_string_lossy().into_owned();
         let mut result = String::new();

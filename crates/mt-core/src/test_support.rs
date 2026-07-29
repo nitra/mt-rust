@@ -1,46 +1,80 @@
 //! Герметичні git-фікстури для тестів `claims`/`publish` — bare-репозиторій
 //! як "origin" + звичайний клон з одним комітом на `main`. Тільки для тестів
 //! (`#[cfg(test)]`), нуль впливу на реальний runtime.
-#![cfg(test)]
+#![cfg(any(test, feature = "test-support"))]
 
-use std::path::Path;
-use std::process::Command;
+use std::{io::Write, path::Path};
 
-/// Запускає git-команду в `dir`, панікує з stderr при ненульовому exit-коді.
-pub fn run(dir: &Path, args: &[&str]) {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.local")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.local")
-        .output()
-        .unwrap_or_else(|e| panic!("git {args:?}: {e}"));
-    if !out.status.success() {
-        panic!(
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
+use crate::git::{compat, GitRepository, SignaturePolicy};
+
+/// Комітить усі поточні зміни з детермінованою test identity.
+pub fn commit_all(dir: &Path, message: &str) {
+    GitRepository::open(dir)
+        .unwrap()
+        .commit_all_if_changed(message, SignaturePolicy::Runner)
+        .unwrap();
 }
 
-/// Як [`run`], але повертає trimmed stdout.
-pub fn output(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .unwrap_or_else(|e| panic!("git {args:?}: {e}"));
-    if !out.status.success() {
-        panic!(
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
+/// Публікує поточний `HEAD` у `origin/<refname>` через вузький compat API.
+pub fn push_head(dir: &Path, refname: &str) {
+    compat::push_head(dir, refname).unwrap();
+}
+
+/// Повертає SHA поточного `HEAD`.
+pub fn head(dir: &Path) -> String {
+    GitRepository::open(dir)
+        .unwrap()
+        .resolve_ref("HEAD")
+        .unwrap()
+}
+
+/// Повертає повну назву гілки або `None` для detached `HEAD`.
+pub fn head_branch(dir: &Path) -> Option<String> {
+    GitRepository::open(dir).unwrap().head_ref_name().unwrap()
+}
+
+/// Повертає SHA першого parent commit-а.
+pub fn first_parent(dir: &Path, commit: &str) -> String {
+    let repository = GitRepository::open(dir).unwrap();
+    let commit = repository
+        .resolve_ref(commit)
+        .unwrap_or_else(|_| commit.into());
+    let commit = gix::ObjectId::from_hex(commit.as_bytes()).unwrap();
+    let parent = repository
+        .inner()
+        .find_commit(commit)
+        .unwrap()
+        .parent_ids()
+        .next()
+        .unwrap()
+        .to_string();
+    parent
+}
+
+/// Читає blob із заданого commit/ref без porcelain `git show`.
+#[allow(dead_code)]
+pub fn blob(dir: &Path, commit: &str, path: &str) -> String {
+    let repository = GitRepository::open(dir).unwrap();
+    let commit = repository
+        .resolve_ref(commit)
+        .unwrap_or_else(|_| commit.into());
+    String::from_utf8(repository.read_blob_at_commit(&commit, path).unwrap()).unwrap()
+}
+
+/// Перевіряє наявність remote ref через native advertisement, без local cache.
+pub fn remote_ref_exists(dir: &Path, reference: &str) -> bool {
+    GitRepository::open(dir)
+        .unwrap()
+        .remote_has_ref(reference)
+        .unwrap()
+}
+
+/// Повертає назви refs, які рекламує `origin`.
+pub fn remote_refs(dir: &Path) -> Vec<String> {
+    GitRepository::open(dir)
+        .unwrap()
+        .advertised_remote_refs()
+        .unwrap()
 }
 
 /// Bare "origin" + звичайний клон із одним комітом на `main`, віддалений
@@ -54,26 +88,45 @@ pub struct TestRepo {
     pub work: tempfile::TempDir,
 }
 
+impl Default for TestRepo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestRepo {
     pub fn new() -> Self {
         let origin = tempfile::tempdir().unwrap();
-        run(origin.path(), &["init", "--bare", "-q", "-b", "main"]);
+        gix::init_bare(origin.path()).unwrap();
+        std::fs::write(origin.path().join("HEAD"), "ref: refs/heads/main\n").unwrap();
 
         let work = tempfile::tempdir().unwrap();
-        run(work.path(), &["init", "-q", "-b", "main"]);
+        gix::init(work.path()).unwrap();
+        std::fs::write(work.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        let config = work.path().join(".git/config");
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&config)
+            .unwrap()
+            .write_all(
+                format!(
+                    "\n[remote \"origin\"]\n\turl = {}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n",
+                    origin.path().display()
+                )
+                .as_bytes(),
+            )
+            .unwrap();
         std::fs::write(work.path().join("README.md"), "x").unwrap();
-        run(work.path(), &["add", "."]);
-        run(work.path(), &["commit", "-q", "-m", "init"]);
-        run(
-            work.path(),
-            &["remote", "add", "origin", origin.path().to_str().unwrap()],
-        );
-        run(work.path(), &["push", "-q", "origin", "main"]);
+        commit_all(work.path(), "init");
+        push_head(work.path(), "refs/heads/main");
 
         Self { origin, work }
     }
 
     pub fn main_sha(&self) -> String {
-        output(self.work.path(), &["rev-parse", "main"])
+        GitRepository::open(self.work.path())
+            .unwrap()
+            .resolve_ref("refs/heads/main")
+            .unwrap()
     }
 }

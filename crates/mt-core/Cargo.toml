@@ -6,6 +6,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+test-support = ["dep:tempfile"]
+
 [lib]
 name = "mt_core"
 
@@ -14,6 +17,8 @@ serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 sha2.workspace = true
+gix.workspace = true
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

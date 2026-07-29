@@ -68,8 +68,7 @@ pub struct PlanReviewJs {
 pub fn spawn_review(name: Option<String>, root: Option<String>) -> Result<PlanReviewJs> {
     let tasks_dir = resolve_tasks_dir(root.as_deref())?;
     let node_path = resolve_node_path(name, &tasks_dir)?;
-    let review =
-        mt_core::spawn::plan_review(&tasks_dir, &node_path).map_err(Error::from_reason)?;
+    let review = mt_core::spawn::plan_review(&tasks_dir, &node_path).map_err(Error::from_reason)?;
     Ok(PlanReviewJs {
         plan_file: review.plan_file,
         nnn: review.nnn as i64,
@@ -114,5 +113,7 @@ pub fn spawn_reject(
     let node_path = resolve_node_path(name, &tasks_dir)?;
     let file = mt_core::spawn::spawn_reject(&tasks_dir, &node_path, &reason)
         .map_err(Error::from_reason)?;
-    Ok(SpawnRejectResult { rejected_file: file })
+    Ok(SpawnRejectResult {
+        rejected_file: file,
+    })
 }

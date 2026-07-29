@@ -8,7 +8,8 @@
     "url": "git+https://github.com/nitra/mt-rust.git"
   },
   "files": [
-    "mt.darwin-arm64.node"
+    "mt.darwin-arm64.node",
+    "CHANGELOG.md"
   ],
   "os": [
     "darwin"
