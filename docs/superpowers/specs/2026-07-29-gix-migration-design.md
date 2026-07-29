@@ -19,9 +19,11 @@ publish. Системний Git допускається лише за одни�
 - `refs/heads/main` — результат fenced publish.
 
 `gix` 0.86 надає repository discovery, refs, object database, commit/tree
-creation, index/status, fetch/push transport і читання linked-worktree
-metadata. Він не надає готового API з еквівалентною семантикою для створення,
-видалення та prune linked worktrees, повного rebase або atomic multi-ref push.
+creation, fetch transport і читання linked-worktree metadata. У pinned версії
+немає достатнього public high-level API, щоб відтворити `git add -A` та
+index-only removal з тією ж семантикою. Також він не надає готового API з
+exact remote lease для custom refs, створення/видалення/prune linked worktrees,
+повного rebase або atomic multi-ref push.
 
 ## Рішення
 
@@ -31,16 +33,17 @@ metadata. Він не надає готового API з еквівалентн�
 
 ```text
 mt-core::git
-├── Repository        discovery, origin, refs, objects, commits, status
-├── Remote            list refs, fetch, push одного/кількох ref updates
+├── Repository        discovery, origin, refs, objects, claim commits
+├── Remote            list refs, fetch
 ├── Worktree          inspection через gix
-└── compat            тільки worktree add/remove/prune, rebase, atomic push
+└── compat            staging/commit, custom-ref CAS, worktree lifecycle,
+                      branch config, rebase, atomic push і локальний ff
 ```
 
 `compat` є внутрішнім, забороненим для прямого використання production-кодом.
-Усі його методи мають назви за семантикою (`create_linked_worktree`,
-`rebase_onto`, `push_atomic`) і задокументовану причину fallback. Це не
-узагальнений "run arbitrary git" API.
+Усі його методи мають назви за семантикою (`commit_all_if_changed`,
+`push_with_expected`, `worktree`, `rebase_onto`, `push_atomic`) і
+задокументовану причину fallback. Це не узагальнений "run arbitrary git" API.
 
 ## Capability matrix
 
@@ -50,14 +53,14 @@ mt-core::git
 | Read/list local refs, resolve SHA | `gix` refs/object API | Повні ref names; без shell parsing. |
 | Read remote claim refs | `gix` remote listing/fetch | Отримує тільки `refs/mt/claims/*`; errors не маскуються як empty state. |
 | Create claim commit | `gix` object writer + ref transaction | Створює blob/tree/commit без index або checkout. |
-| Claim acquire/renew/release | `gix` transport/ref updates | Зберігає compare-and-swap поведінку `--force-with-lease`. |
-| Run ref checkpoint/delete | `gix` transport/ref updates | Пушить/видаляє exact custom ref. |
-| Commit worktree result | `gix` index/status/commit API | Зберігає author/committer `mt-runner`; no-op на чистому дереві. |
+| Claim acquire/renew/release | `compat` custom-ref CAS | Exact `--force-with-lease`; lease mismatch лишається доменним `false`. |
+| Run ref checkpoint/delete | `compat` custom-ref push/CAS | Пушить/видаляє exact custom ref. |
+| Commit worktree result | `compat` staging/commit | Зберігає author/committer `mt-runner`; no-op на чистому дереві. |
 | Worktree list/inventory | `gix` linked-worktree inspection | Парсинг porcelain output зникає. |
 | Worktree create/remove/prune | `compat` | Зберігає Git адміністративні записи й `--force`. |
 | Rebase result worktree | `compat` | Конфлікт завершує publish, rebase abort виконується. |
 | Fenced atomic publish | `compat` | Один atomic push: `main` update + CAS-delete claim/run refs. |
-| Test fixture Git setup | `gix` test support | Створює bare remote, clone, commits, refs без CLI. |
+| Test fixture Git setup | тимчасово Git CLI, test-only | Не входить у production boundary; окрема наступна міграція, коли gix fixture facade покриє всі сценарії. |
 | CI/release shell commands | `gix` або non-Git tooling, де це runtime Rust | GitHub Actions checkout/push release workflow лишається GitHub Actions concern; не є Rust runtime. |
 
 ## Безпека й коректність
@@ -93,16 +96,13 @@ Remote update повертає один із трьох результатів:
 
 1. Додати facade й тестове середовище `gix` без зміни поведінки callers.
 2. Перевести discovery, refs, object/claim commit і remote claim read.
-3. Перевести acquire/renew/release claims та run refs, довівши CAS на локальному
-   bare remote у паралельних тестах.
-4. Перевести status/index/commit і worktree inspection.
-5. Винести лишені shell-outs у `compat`; перевести worktree lifecycle, rebase
-   та atomic publish на цей вузький API.
-6. Замість CLI-based fixture helpers застосувати `gix`; залишити CLI лише в
-   compat contract tests, що порівнюють результат Git porcelain.
-7. Застосувати static guard: production crates не можуть містити
-   `Command::new("git")`, а `compat` має allow-list трьох capability groups.
-8. Після кожного оновлення `gix` перевіряти matrix; реалізований upstream API
+3. Для custom-ref CAS, status/index/commit залишити exact Git porcelain у
+   `compat`, доки gix не надає еквівалентну безпечну API.
+4. Перевести worktree inspection, runtime fetch і SHA resolution на gix;
+   винести worktree lifecycle, rebase й atomic publish у `compat`.
+5. Застосувати static guard: production crates не можуть містити
+   `Command::new("git")` поза `git::compat`.
+6. Після кожного оновлення `gix` перевіряти matrix; реалізований upstream API
    переносить відповідну capability з `compat` до native gix та видаляє fallback.
 
 ## Тестування
@@ -134,6 +134,8 @@ Rust-продукту.
 ## Критерій завершення
 
 У production Rust-коді нема прямого `Command::new("git")`. Усі можливості,
-наявні у pinned `gix`, реалізовані native API. Єдиний shell-out живе в
-`mt-core::git::compat`, має allow-list worktree lifecycle, rebase і atomic
-multi-ref push, покритий contract tests і задокументований capability matrix.
+для яких pinned `gix` 0.86 має еквівалентний безпечний API, реалізовані native
+API. Єдиний production shell-out живе в `mt-core::git::compat`; його allow-list
+охоплює staging/commit, custom-ref CAS, worktree lifecycle, branch config,
+rebase, atomic multi-ref push і локальний fast-forward. Test-only fixtures не
+є частиною production boundary та залишаються окремою міграційною задачею.

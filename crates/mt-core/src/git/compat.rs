@@ -1,7 +1,8 @@
-//! Тимчасова межа Git porcelain для операцій, яких немає у pinned `gix`.
+//! Вузька межа Git porcelain для операцій, яких немає у pinned `gix` 0.86.
 //!
-//! Дозволені лише CAS push/delete custom refs. Worktree lifecycle, rebase та
-//! atomic publish додаватимуться тут окремими contract-tested операціями.
+//! Дозволені capability: staging/commit, custom-ref CAS, worktree lifecycle,
+//! branch config, rebase, atomic publish і локальний fast-forward. Це не
+//! загальний API для виконання довільних Git-команд.
 
 use std::{path::Path, process::Command};
 

@@ -8,13 +8,24 @@
 
 **Tech Stack:** Rust 2021, `gix` 0.86 with `blocking-network-client`, existing `serde`, `tempfile`, Cargo integration tests.
 
+## Execution status (2026-07-29)
+
+Tasks 1–3 виконані native `gix`. Замість початково запланованих Task 4–5
+native реалізацій, точна перевірка pinned `gix` 0.86 показала дві відсутні
+еквівалентні capability: exact remote lease для custom refs та high-level
+worktree-to-index staging. Їх, разом із worktree lifecycle, rebase і atomic
+multi-ref push, ізольовано в `mt-core::git::compat`; production callers
+працюють виключно через facade. Task 8 static guard виконано для production
+коду. Task 7 (повна заміна test-only Git fixtures) лишається окремим
+follow-up: він не послаблює production boundary.
+
 ## Global Constraints
 
 - Pinned dependency: `gix = "0.86"`; enabled features must include blocking network transport, index/status and worktree inspection.
 - Keep exact ref schema: `refs/mt/claims/<node-hash>` and `refs/mt/runs/<node-hash>/<token>`.
 - Remote race is `Rejected(LeaseMismatch)`, never a silently ignored error.
 - Outside `crates/mt-core/src/git/compat.rs` production code must not contain `Command::new("git")`.
-- `compat` may expose only `create_linked_worktree`, `remove_linked_worktree`, `prune_linked_worktrees`, `rebase_onto`, and `push_atomic`.
+- `compat` is the sole production Git CLI boundary. Its documented allow-list is staging/commit, custom-ref CAS, worktree lifecycle, branch config, rebase, atomic publish and local fast-forward.
 - Every changed Rust file receives current Ukrainian `docs/<stem>.md` documentation.
 - Run the changelog gate after every committed unit; do not add generated `mt/lint-*` task drafts to a feature commit.
 
