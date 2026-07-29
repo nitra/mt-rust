@@ -140,14 +140,13 @@ Commit: `git add crates/mt-core crates/mt && git commit -m "feat(git): use gix f
 **Files:**
 - Modify: `crates/mt-core/src/git/mod.rs`
 - Modify: `crates/mt-core/src/claims.rs:138-365`
-- Modify: `crates/mt-core/src/test_support.rs`
-- Test: `crates/mt-core/tests/claims_gix.rs`
+- Test: `crates/mt-core/src/claims.rs`
 
 **Interfaces:**
 - Produces: `write_commit(parent, files, message, signature)`, `list_remote_refs(pattern)`, `fetch_exact_ref(refname)`.
 - Preserves: `ClaimInfo`, `ClaimFields`, `parse_ls_remote`, `acquire_claim` public behavior.
 
-- [ ] **Step 1: Add failing object and remote-read tests**
+- [x] **Step 1: Add failing object and remote-read tests**
 
 ```rust
 #[test]
@@ -156,23 +155,23 @@ fn claim_commit_contains_only_claim_yaml_and_expected_parent() { /* fixture */ }
 fn remote_claim_read_ignores_non_claim_refs_and_reports_transport_failure() { /* fixture */ }
 ```
 
-- [ ] **Step 2: Run the focused tests**
+- [x] **Step 2: Run the focused tests**
 
-Run: `cargo test -p mt-core --test claims_gix`
+Run: `cargo test -p mt-core claims::tests -- --nocapture`
 
 Expected: FAIL before native writer/remote reader exists.
 
-- [ ] **Step 3: Implement without index or checkout**
+- [x] **Step 3: Implement without index or checkout**
 
 Build `.mt-claim.yml` as a blob, put it in a one-entry tree, create a commit with the specified parent, then list/fetch only `refs/mt/claims/*` through the configured `origin` remote. Decode the claim blob with gix object APIs instead of `git show`.
 
-- [ ] **Step 4: Run claim regression tests**
+- [x] **Step 4: Run claim regression tests**
 
 Run: `cargo test -p mt-core claims -- --nocapture`
 
 Expected: PASS, including expired-lease parsing and custom-ref filtering.
 
-- [ ] **Step 5: Docs, gate and commit**
+- [x] **Step 5: Docs, gate and commit**
 
 Run: `npx @7n/rules lint doc-files && npx @7n/rules lint changelog`
 
