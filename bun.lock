@@ -6,7 +6,7 @@
       "name": "mt-rust-mono",
       "devDependencies": {
         "@7n/mt": "^0.30.1",
-        "@7n/rules": "^1.43.1",
+        "@7n/rules": "^1.55.3",
         "@7n/rules-ci-github": "^1.9.0",
         "@7n/rules-lang-js": "^0.9.0",
         "@7n/rules-lang-rust": "^0.6.1",
@@ -73,7 +73,7 @@
 
     "@7n/relay": ["@7n/relay@workspace:relay"],
 
-    "@7n/rules": ["@7n/rules@1.43.1", "", { "dependencies": { "@7n/llm-lib": "^2.8.2", "@7n/mt": "^0.5.1", "@zed-industries/agent-client-protocol": "^0.4.5", "ajv": "^8.20.0", "cli-progress": "^3.12.0", "github-actionlint": "^1.7.12", "globby": "^16.0.0", "ignore": "^7.0.5", "markdownlint-cli2": "^0.22.1", "oxc-parser": "^0.137.0", "picomatch": "^4.0.4", "smol-toml": "^1.7.0", "v8r": "^6.1.0", "yaml": "^2.9.0", "zod": "^4.4.3" }, "optionalDependencies": { "@agentclientprotocol/claude-agent-acp": "^0.59.0", "@earendil-works/pi-ai": "0.80.10", "@earendil-works/pi-coding-agent": "0.80.10" }, "bin": { "n-rules": "bin/n-rules.js", "n-cursor": "bin/n-rules.js" } }, "sha512-vsZyaEYwePoibaCmh0UQDpb93qMOjL7m76+GvBdxTCopj0Ej2A34iS58wQ4jLL+NPh26R5/xWLJKcT4WqGSPaw=="],
+    "@7n/rules": ["@7n/rules@1.55.3", "", { "dependencies": { "@7n/llm-lib": "2.12.2", "@zed-industries/agent-client-protocol": "^0.4.5", "ajv": "^8.20.0", "cli-progress": "^3.12.0", "github-actionlint": "^1.7.12", "globby": "^16.0.0", "ignore": "^7.0.5", "markdownlint-cli2": "^0.22.1", "oxc-parser": "^0.137.0", "picomatch": "^4.0.4", "smol-toml": "^1.7.0", "v8r": "^6.1.0", "yaml": "^2.9.0", "zod": "^4.4.3" }, "optionalDependencies": { "@agentclientprotocol/claude-agent-acp": "^0.59.0", "@earendil-works/pi-ai": "0.80.10", "@earendil-works/pi-coding-agent": "0.80.10" }, "bin": { "n-rules": "bin/n-rules.js", "n-cursor": "bin/n-rules.js" } }, "sha512-B1IH+bZP4sDxIhQ4efGdufPku36MoDA0yEYBTMX682PlDmonHdqPPQzg6Pc1auEjC0PlD0gcmIyEQcZ9vZ4eXA=="],
 
     "@7n/rules-ci-github": ["@7n/rules-ci-github@1.9.1", "", { "dependencies": { "yaml": "^2.9.0" }, "peerDependencies": { "@7n/rules": ">=1.2.0" } }, "sha512-4OfYsmoEQygJccBtzVy93216Hucd76IsHCIaV8yk0nsCxs2XJUgtY0bkq3HYFqySXkZ9qCaMcTwLYVbDINcNZA=="],
 
@@ -2157,7 +2157,7 @@
 
     "@7n/llm-lib/@earendil-works/pi-ai": ["@earendil-works/pi-ai@0.80.10", "", { "dependencies": { "@anthropic-ai/sdk": "0.91.1", "@aws-sdk/client-bedrock-runtime": "3.1048.0", "@google/genai": "1.52.0", "@mistralai/mistralai": "2.2.6", "@opentelemetry/api": "1.9.0", "@smithy/node-http-handler": "4.7.3", "http-proxy-agent": "7.0.2", "https-proxy-agent": "7.0.6", "openai": "6.26.0", "partial-json": "0.1.7", "typebox": "1.1.38" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-Moe/H8c87yacDGK9dPbWphZNjVsrb3nTrIHycOQJAkFEnY9PYxOOd74+ny44kATfPU9Dm7aTHefar3pZF+UKUA=="],
 
-    "@7n/rules/@7n/mt": ["@7n/mt@0.5.1", "", { "optionalDependencies": { "@7n/mt-darwin-arm64": "0.5.1", "@7n/mt-linux-x64": "0.5.1" }, "bin": { "mt": "bin/mt.js" } }, "sha512-fIP75AODAX6ri+Geznpph0BJR0kkOWeCarSNJCibLCPH3vnfbEvHC9/MgTk3zg9cYIGEFAHd1gkCEnOekexIdg=="],
+    "@7n/rules/@7n/llm-lib": ["@7n/llm-lib@2.12.2", "", { "optionalDependencies": { "@7n/llm-lib-darwin-arm64": "2.12.2", "@7n/llm-lib-linux-x64": "2.12.2" }, "peerDependencies": { "@earendil-works/pi-ai": "~0.80.10", "@earendil-works/pi-coding-agent": "~0.80.10" }, "optionalPeers": ["@earendil-works/pi-ai", "@earendil-works/pi-coding-agent"], "bin": { "n-llm-chains-report": "bin/chains-report.mjs" } }, "sha512-OczF4Zom5XUgLYFgqulVuAFG1HjBGCtseOP+ApHv6u4M5OaN2aaPDdd7cBwFWqzxyhD7wcq8TGOtackJW3itzg=="],
 
     "@7n/rules/@earendil-works/pi-ai": ["@earendil-works/pi-ai@0.80.10", "", { "dependencies": { "@anthropic-ai/sdk": "0.91.1", "@aws-sdk/client-bedrock-runtime": "3.1048.0", "@google/genai": "1.52.0", "@mistralai/mistralai": "2.2.6", "@opentelemetry/api": "1.9.0", "@smithy/node-http-handler": "4.7.3", "http-proxy-agent": "7.0.2", "https-proxy-agent": "7.0.6", "openai": "6.26.0", "partial-json": "0.1.7", "typebox": "1.1.38" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-Moe/H8c87yacDGK9dPbWphZNjVsrb3nTrIHycOQJAkFEnY9PYxOOd74+ny44kATfPU9Dm7aTHefar3pZF+UKUA=="],
 
@@ -2325,9 +2325,9 @@
 
     "yargs/string-width": ["string-width@7.2.0", "", { "dependencies": { "emoji-regex": "^10.3.0", "get-east-asian-width": "^1.0.0", "strip-ansi": "^7.1.0" } }, "sha512-tsaTIkKW9b4N+AEj+SVA+WhJzV7/zMhcSu78mLKWSk7cXMOSHsBKFWUs0fWwq8QyK3MgJBQRX6Gbi4kYbdvGkQ=="],
 
-    "@7n/rules/@7n/mt/@7n/mt-darwin-arm64": ["@7n/mt-darwin-arm64@0.5.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-ozofQxbsdrv7cVZJeb9P9MLwzpdNxdqTcmzRQjwSf316TK8ptxzZhU0b24CsoH/Ia98zhbJLBPsdK/ueHWFl4Q=="],
+    "@7n/rules/@7n/llm-lib/@7n/llm-lib-darwin-arm64": ["@7n/llm-lib-darwin-arm64@2.12.2", "", { "os": "darwin", "cpu": "arm64" }, "sha512-AHbWfwNXbQNxRqS+DwGVnDmd86Ru2+p5l/FOPnc8cKbUlTcMJP6RJWcmtNOtGSKbFX+uTgTeboUveqLza6qYCQ=="],
 
-    "@7n/rules/@7n/mt/@7n/mt-linux-x64": ["@7n/mt-linux-x64@0.5.1", "", { "os": "linux", "cpu": "x64" }, "sha512-c4b1c435vfGZcRKkLnWcoKs8O6KTATFFx6gPGnid4ee+JDqzyhtxb5kzxYkcTQySO8iBHPAtUMEOBCHDrF1UjQ=="],
+    "@7n/rules/@7n/llm-lib/@7n/llm-lib-linux-x64": ["@7n/llm-lib-linux-x64@2.12.2", "", { "os": "linux", "cpu": "x64" }, "sha512-cgYSO3rucl+iJMKmMK4FtlDSy1o0xlHgxHHkwCpjBD4IoDt5kg4EejeKV09DzIsex+0NdDNtDbD2uzHTCr1i8Q=="],
 
     "@babel/helper-compilation-targets/lru-cache/yallist": ["yallist@3.1.1", "", {}, "sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g=="],
 
