@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::frontmatter::parse_yaml;
+use crate::{frontmatter::parse_yaml, git::GitRepository};
 
 /// Префікс claim refs (дефолт `.mt.json` → `claim_ref_prefix`).
 pub const CLAIM_REF_PREFIX: &str = "refs/mt/claims";
@@ -42,8 +42,9 @@ pub const RUN_REF_PREFIX: &str = "refs/mt/runs";
 
 /// Git top-level, що містить `tasks_dir` (`git rev-parse --show-toplevel`).
 pub fn discover_repo_root(tasks_dir: &Path) -> Result<PathBuf, String> {
-    let out = git(tasks_dir, &["rev-parse", "--show-toplevel"])?;
-    Ok(PathBuf::from(out.trim()))
+    GitRepository::open(tasks_dir)
+        .and_then(|repository| repository.repo_root())
+        .map_err(|error| error.to_string())
 }
 
 /// Канонічний шлях `tasks_dir` відносно `repo_root`, POSIX-нормалізований

@@ -165,7 +165,7 @@ pub fn create_dev_worktree(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorktreeEntry {
     pub path: String,
-    /// Останній компонент шляху (те саме, що повертає [`crate::parse_worktree_list`]).
+    /// Останній компонент шляху (те саме, що повертає [`crate::discover_worktrees`]).
     pub name: String,
     pub head: String,
     /// `None` — detached HEAD.

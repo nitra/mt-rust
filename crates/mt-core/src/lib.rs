@@ -773,35 +773,12 @@ pub fn scan_tasks(tasks_dir: String, worktrees: Vec<String>) -> Result<Vec<TaskN
     Ok(nodes)
 }
 
-/// Виявляє активні git-worktree через `git worktree list --porcelain` із `start_dir`.
-/// Повертає імена (останній компонент шляху кожного worktree). Помилка git → порожньо.
+/// Виявляє активні git-worktree native `gix` API із `start_dir`.
+/// Повертає імена (останній компонент шляху кожного worktree). Помилка → порожньо.
 pub fn discover_worktrees(start: &Path) -> Vec<String> {
-    let output = std::process::Command::new("git")
-        .args(["worktree", "list", "--porcelain"])
-        .current_dir(start)
-        .output();
-    match output {
-        Ok(out) if out.status.success() => {
-            parse_worktree_list(&String::from_utf8_lossy(&out.stdout))
-        }
-        _ => vec![],
-    }
-}
-
-/// Парсить `git worktree list --porcelain` → імена worktree (останній компонент шляху).
-pub fn parse_worktree_list(output: &str) -> Vec<String> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let path = line.strip_prefix("worktree ")?.trim();
-            let name = path.rsplit(['/', '\\']).next().unwrap_or("");
-            if name.is_empty() {
-                None
-            } else {
-                Some(name.to_string())
-            }
-        })
-        .collect()
+    git::GitRepository::open(start)
+        .and_then(|repository| repository.linked_worktrees())
+        .unwrap_or_default()
 }
 
 /// Знаходить усі mt/ директорії у репо, починаючи від `start_dir`.
@@ -1513,16 +1490,6 @@ mod tests {
         assert_eq!(sanitize("research/collect data"), "research-collect-data");
         assert_eq!(sanitize("my-task_01"), "my-task_01");
         assert_eq!(sanitize(""), "");
-    }
-
-    // ── worktree list parsing ──
-    #[test]
-    fn parse_worktree_list_extracts_names() {
-        let out = "worktree /repo\nHEAD abc\n\nworktree /repo/.worktrees/my-task-123\nHEAD def\n";
-        assert_eq!(
-            parse_worktree_list(out),
-            vec!["repo".to_string(), "my-task-123".to_string()]
-        );
     }
 
     // ── create_task (write-side) ──
