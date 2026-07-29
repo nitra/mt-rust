@@ -1,0 +1,41 @@
+crates/mt/src/commands/worktree.rs
+  s_67be698dba3bc2::t_eb553304aff1b2 7-8,28-29,58-62,70-72,83,121-125,127,132-133
+crates/mt-napi/src/worktree.rs
+  s_67be698dba3bc2::t_eaebfd7303494e 16,22,36-39,82,97
+  s_67be698dba3bc2::t_f44cce83997596 123-151
+crates/mt/tests/cli.rs
+  s_67be698dba3bc2::t_71257c981c12ab 149-188
+  s_67be698dba3bc2::t_b9f2b55144f465 148
+crates/mt-core/src/worktree.rs
+  s_67be698dba3bc2::t_8d96032cab6847 36-39,145
+  s_67be698dba3bc2::t_207ff41504f903 297-299,329-332,556,571-572,583-585,600-601
+  s_67be698dba3bc2::t_3a269d5a54e5f0 392-396
+  s_67be698dba3bc2::t_077b03e2de6904 548-549,551-554,557-561,563-570,573-576,578-582,586-599,602-604,606-615,632,634,636,638
+  s_67be698dba3bc2::t_6c73e9eee640ba 268-296,300-328
+  s_67be698dba3bc2::t_6ab25ecf3a8bed 555
+  s_67be698dba3bc2::t_f315f9f617907d 562,577,605
+  s_67be698dba3bc2::t_c95ffb3d049a4c 389-391
+  s_67be698dba3bc2::t_044ae281ed20a9 550
+  s_67be698dba3bc2::t_263824583c5ff4 616-618,629-631
+  s_67be698dba3bc2::t_3c373563dca5b5 633
+  s_67be698dba3bc2::t_fc164bc52c9b85 635
+  s_67be698dba3bc2::t_4e9d470ffe6d1e 637
+  s_67be698dba3bc2::t_752040bbfdb0e3 639
+  s_67be698dba3bc2::t_94760cfb733fd4 361,378,400,402,404,619-628
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "ae81f70d8e39d1642d2ec5947080ff8cf2d4e8c7",
+  "prompts": {},
+  "sessions": {
+    "s_67be698dba3bc2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabea-e3c4-7401-8e4c-79d709399c72",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
