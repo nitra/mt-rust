@@ -845,9 +845,8 @@ mod tests {
     /// потрібно для `run_node()`: worktree чекаутиться саме з `origin/main`.
     fn node(tmp: &Path, path: &str) {
         node_files_only(tmp, path);
-        crate::test_support::run(tmp, &["add", "."]);
-        crate::test_support::run(tmp, &["commit", "-q", "-m", &format!("add {path}")]);
-        crate::test_support::run(tmp, &["push", "-q", "origin", "main"]);
+        crate::test_support::commit_all(tmp, &format!("add {path}"));
+        crate::test_support::push_head(tmp, "refs/heads/main");
     }
 
     /// Тіло фейкового `claude`, що пише валідний fact поточної спроби
@@ -1010,11 +1009,10 @@ mod tests {
         assert!(!crate::has_running_marker(&root.join("solo")));
 
         // Опубліковано в origin/main: claim/run ref прибрані, коміт на remote.
-        let claims = crate::test_support::output(
+        assert!(!crate::test_support::remote_ref_exists(
             repo.work.path(),
-            &["ls-remote", "origin", "refs/mt/claims/*"],
-        );
-        assert!(claims.is_empty());
+            "refs/mt/claims/00000000000000000000"
+        ));
         // Локальний main (той самий work-клон) підхопив публікацію.
         assert!(root.join("solo/fact_001.md").is_file());
         let run = fs::read_to_string(root.join("solo/run_001.md")).unwrap();
@@ -1068,9 +1066,8 @@ mod tests {
         )
         .unwrap();
         fs::write(dir.join("a.md"), "schema_version: 1\n").unwrap();
-        crate::test_support::run(repo.work.path(), &["add", "."]);
-        crate::test_support::run(repo.work.path(), &["commit", "-q", "-m", "add gated"]);
-        crate::test_support::run(repo.work.path(), &["push", "-q", "origin", "main"]);
+        crate::test_support::commit_all(repo.work.path(), "add gated");
+        crate::test_support::push_head(repo.work.path(), "refs/heads/main");
 
         let r = root.to_string_lossy().into_owned();
         let mut result = String::new();

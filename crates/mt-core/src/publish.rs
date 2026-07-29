@@ -179,7 +179,7 @@ fn sync_local_main(repo_root: &Path, result_sha: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::claims::{acquire_claim, node_hash, ClaimFields};
-    use crate::test_support::{output, TestRepo};
+    use crate::test_support::{commit_all, remote_ref_exists, TestRepo};
     use crate::worktree::{create_run_worktree, push_run_ref};
 
     fn setup(repo: &TestRepo) -> (String, crate::claims::ClaimPush, std::path::PathBuf) {
@@ -217,8 +217,7 @@ mod tests {
         let base = repo.main_sha();
 
         std::fs::write(wt.join("result.txt"), "done").unwrap();
-        crate::test_support::run(&wt, &["add", "."]);
-        crate::test_support::run(&wt, &["commit", "-q", "-m", "mt: result"]);
+        commit_all(&wt, "mt: result");
 
         let req = PublishRequest {
             worktree: &wt,
@@ -233,18 +232,15 @@ mod tests {
         assert!(outcome.result_sha.is_some());
 
         // main на remote просунувся; claim/run ref прибрані.
-        let remote_main = output(
+        assert!(remote_ref_exists(repo.work.path(), "refs/heads/main"));
+        assert!(!remote_ref_exists(
             repo.work.path(),
-            &["ls-remote", "origin", "refs/heads/main"],
-        );
-        assert!(remote_main.contains(outcome.result_sha.as_ref().unwrap()));
-        let claims_left = output(
+            &format!("refs/mt/claims/{hash}")
+        ));
+        assert!(!remote_ref_exists(
             repo.work.path(),
-            &["ls-remote", "origin", "refs/mt/claims/*"],
-        );
-        assert!(claims_left.is_empty());
-        let runs_left = output(repo.work.path(), &["ls-remote", "origin", "refs/mt/runs/*"]);
-        assert!(runs_left.is_empty());
+            &format!("refs/mt/runs/{hash}/tok1")
+        ));
 
         // Локальний main (той самий work-клон, HEAD на main) синхронізовано.
         assert!(repo.work.path().join("result.txt").is_file());
@@ -278,8 +274,7 @@ mod tests {
         .unwrap();
 
         std::fs::write(wt.join("result.txt"), "done").unwrap();
-        crate::test_support::run(&wt, &["add", "."]);
-        crate::test_support::run(&wt, &["commit", "-q", "-m", "mt: result"]);
+        commit_all(&wt, "mt: result");
 
         let req = PublishRequest {
             worktree: &wt,

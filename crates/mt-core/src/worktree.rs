@@ -334,11 +334,10 @@ mod tests {
         )
         .unwrap();
         assert!(path.join("README.md").is_file());
-        let head = crate::test_support::output(&path, &["rev-parse", "HEAD"]);
+        let head = crate::test_support::head(&path);
         assert_eq!(head, base);
         // Detached — не на гілці: `--abbrev-ref HEAD` повертає літерал "HEAD".
-        let branch = crate::test_support::output(&path, &["rev-parse", "--abbrev-ref", "HEAD"]);
-        assert_eq!(branch, "HEAD");
+        assert_eq!(crate::test_support::head_branch(&path), None);
     }
 
     #[test]
@@ -357,26 +356,17 @@ mod tests {
         // push_run_ref читає HEAD поточного репо (work), тож пушимо з worktree-контексту.
         push_run_ref(&path, "deadbeef", "tok1").unwrap();
 
-        let ls = crate::test_support::output(
+        let reference = format!("{RUN_REF_PREFIX}/deadbeef/tok1");
+        assert!(crate::test_support::remote_ref_exists(
             repo.work.path(),
-            &[
-                "ls-remote",
-                "origin",
-                &format!("{RUN_REF_PREFIX}/deadbeef/tok1"),
-            ],
-        );
-        assert!(!ls.is_empty());
+            &reference
+        ));
 
         assert!(delete_run_ref(repo.work.path(), "deadbeef", "tok1", &base).unwrap());
-        let ls = crate::test_support::output(
+        assert!(!crate::test_support::remote_ref_exists(
             repo.work.path(),
-            &[
-                "ls-remote",
-                "origin",
-                &format!("{RUN_REF_PREFIX}/deadbeef/tok1"),
-            ],
-        );
-        assert!(ls.is_empty());
+            &reference
+        ));
     }
 
     #[test]
@@ -439,8 +429,10 @@ mod tests {
         let path =
             create_dev_worktree(repo.work.path(), worktrees_dir.path(), "my-task", "main").unwrap();
         assert!(path.join("README.md").is_file());
-        let branch = crate::test_support::output(&path, &["rev-parse", "--abbrev-ref", "HEAD"]);
-        assert_eq!(branch, "mt/my-task");
+        assert_eq!(
+            crate::test_support::head_branch(&path).as_deref(),
+            Some("refs/heads/mt/my-task")
+        );
     }
 
     #[test]
@@ -491,14 +483,10 @@ mod tests {
         assert!(branch_description(repo.work.path(), "mt/demo")
             .unwrap()
             .is_none());
-        assert!(std::process::Command::new("git")
-            .arg("-C")
-            .arg(repo.work.path())
-            .args(["show-ref", "--verify", "--quiet", "refs/heads/mt/demo"])
-            .status()
+        assert!(crate::git::GitRepository::open(repo.work.path())
             .unwrap()
-            .code()
-            .is_some_and(|code| code != 0));
+            .resolve_ref("refs/heads/mt/demo")
+            .is_err());
     }
 
     #[test]
@@ -508,8 +496,7 @@ mod tests {
         let path =
             create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main").unwrap();
         std::fs::write(path.join("feature.txt"), "worktree-only change").unwrap();
-        crate::test_support::run(&path, &["add", "feature.txt"]);
-        crate::test_support::run(&path, &["commit", "-m", "feature work"]);
+        crate::test_support::commit_all(&path, "feature work");
         let entry = list_worktrees(repo.work.path())
             .unwrap()
             .into_iter()
@@ -519,14 +506,10 @@ mod tests {
         remove_dev_worktree(repo.work.path(), &entry, "demo", false).unwrap();
 
         assert!(!path.exists());
-        assert!(std::process::Command::new("git")
-            .arg("-C")
-            .arg(repo.work.path())
-            .args(["show-ref", "--verify", "--quiet", "refs/heads/mt/demo"])
-            .status()
+        assert!(crate::git::GitRepository::open(repo.work.path())
             .unwrap()
-            .code()
-            .is_some_and(|code| code != 0));
+            .resolve_ref("refs/heads/mt/demo")
+            .is_err());
     }
 
     #[test]

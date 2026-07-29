@@ -275,7 +275,7 @@ pub fn fetch_remote_claims(repo_root: &Path, grace_sec: i64) -> Result<Vec<Claim
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{output, run, TestRepo};
+    use crate::test_support::{first_parent, remote_ref_exists, TestRepo};
     use chrono::TimeZone;
 
     fn fields<'a>(node: &'a str, token: &'a str, base_sha: &'a str) -> ClaimFields<'a> {
@@ -357,10 +357,7 @@ mod tests {
         assert_ne!(renewed.commit_sha, first.commit_sha);
 
         // Ланцюг claim-комітів: parent нового = попередній claim-коміт (не main).
-        let parent = output(
-            repo.work.path(),
-            &["rev-parse", &format!("{}^", renewed.commit_sha)],
-        );
+        let parent = first_parent(repo.work.path(), &renewed.commit_sha);
         assert_eq!(parent, first.commit_sha);
 
         // Застаріле знання SHA (гонка вже пройшла) → CAS відхиляє.
@@ -393,18 +390,16 @@ mod tests {
             "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
         )
         .unwrap());
-        let ls = output(
+        assert!(remote_ref_exists(
             repo.work.path(),
-            &["ls-remote", "origin", &format!("{CLAIM_REF_PREFIX}/{hash}")],
-        );
-        assert!(!ls.trim().is_empty());
+            &format!("{CLAIM_REF_PREFIX}/{hash}")
+        ));
 
         assert!(release_claim(repo.work.path(), &hash, &claim.commit_sha).unwrap());
-        let ls = output(
+        assert!(!remote_ref_exists(
             repo.work.path(),
-            &["ls-remote", "origin", &format!("{CLAIM_REF_PREFIX}/{hash}")],
-        );
-        assert!(ls.trim().is_empty());
+            &format!("{CLAIM_REF_PREFIX}/{hash}")
+        ));
     }
 
     #[test]
@@ -444,7 +439,7 @@ mod tests {
     #[test]
     fn fetch_remote_claims_reports_a_missing_origin() {
         let repo = tempfile::tempdir().unwrap();
-        run(repo.path(), &["init", "-q", "-b", "main"]);
+        gix::init(repo.path()).unwrap();
 
         assert!(fetch_remote_claims(repo.path(), 60).is_err());
     }
