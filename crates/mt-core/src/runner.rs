@@ -35,6 +35,7 @@ use crate::config::{
     AgentCliEnv,
 };
 use crate::frontmatter::parse_front_matter;
+use crate::git::GitRepository;
 use crate::nnn::pad_nnn;
 use crate::publish::{fenced_publish, PublishRequest};
 use crate::signal::{self, next_run_nnn, write_run_fm};
@@ -458,23 +459,6 @@ fn md_section(text: &str, name: &str) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
 fn iso_now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
@@ -623,8 +607,13 @@ pub fn run_node_env(
     let publish_retry_max = fm_u64(&config, "publish_retry_max").unwrap_or(8) as u32;
     let publish_retry_base_ms = fm_u64(&config, "publish_retry_base_ms").unwrap_or(250);
 
-    git(&repo_root, &["fetch", "--quiet", "origin", "main"])?;
-    let base_sha = git(&repo_root, &["rev-parse", "origin/main"])?;
+    let repository = GitRepository::open(&repo_root).map_err(|error| error.to_string())?;
+    repository
+        .fetch_refspec("+refs/heads/main:refs/remotes/origin/main")
+        .map_err(|error| error.to_string())?;
+    let base_sha = repository
+        .resolve_ref("refs/remotes/origin/main")
+        .map_err(|error| error.to_string())?;
 
     let token = fresh_token();
     let runner_id = format!("mt-runner/{}", std::process::id());

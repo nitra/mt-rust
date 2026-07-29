@@ -121,24 +121,26 @@ fn attach_impl(
     let tasks_root_rel = tasks_root_relative(&repo_root, &config.tasks_dir)?;
     let hash = node_hash(&tasks_root_rel, node);
 
-    git(&repo_root, &["fetch", "--quiet", "origin", "main"])?;
-    let base_sha = git(&repo_root, &["rev-parse", "origin/main"])?;
+    let repository = GitRepository::open(&repo_root).map_err(|error| error.to_string())?;
+    repository
+        .fetch_refspec("+refs/heads/main:refs/remotes/origin/main")
+        .map_err(|error| error.to_string())?;
+    let base_sha = repository
+        .resolve_ref("refs/remotes/origin/main")
+        .map_err(|error| error.to_string())?;
 
     let worktree_base = match resume_token {
         None => base_sha.clone(),
         Some(old_token) => {
             let old_run_ref = format!("{RUN_REF_PREFIX}/{hash}/{old_token}");
-            git(
-                &repo_root,
-                &[
-                    "fetch",
-                    "--quiet",
-                    "origin",
-                    &format!("+{old_run_ref}:{old_run_ref}"),
-                ],
-            )
-            .map_err(|e| format!("attach-resume: старий run ref {old_run_ref} недоступний: {e}"))?;
-            git(&repo_root, &["rev-parse", &old_run_ref])?
+            repository
+                .fetch_refspec(&format!("+{old_run_ref}:{old_run_ref}"))
+                .map_err(|error| {
+                    format!("attach-resume: старий run ref {old_run_ref} недоступний: {error}")
+                })?;
+            repository.resolve_ref(&old_run_ref).map_err(|error| {
+                format!("attach-resume: старий run ref {old_run_ref} недоступний: {error}")
+            })?
         }
     };
 

@@ -199,6 +199,30 @@ impl GitRepository {
         Ok(refs)
     }
 
+    /// Завантажує exact remote ref у вказаний локальний ref через native gix transport.
+    pub fn fetch_refspec(&self, refspec_text: &str) -> Result<(), GitError> {
+        let refspec =
+            gix::refspec::parse(refspec_text.into(), gix::refspec::parse::Operation::Fetch)
+                .map_err(GitError::from_error)?
+                .to_owned();
+        let remote = self
+            .repo
+            .find_remote("origin")
+            .map_err(GitError::from_error)?;
+        let mut options = gix::remote::ref_map::Options::default();
+        options.extra_refspecs.push(refspec);
+        let connection = remote
+            .connect(gix::remote::Direction::Fetch)
+            .map_err(GitError::from_error)?;
+        let prepared = connection
+            .prepare_fetch(gix::progress::Discard, options)
+            .map_err(GitError::from_error)?;
+        prepared
+            .receive(gix::progress::Discard, &AtomicBool::new(false))
+            .map_err(GitError::from_error)?;
+        Ok(())
+    }
+
     /// Повертає імена головного та всіх доступних linked worktree.
     pub fn linked_worktrees(&self) -> Result<Vec<String>, GitError> {
         let main_repo = self.repo.main_repo().map_err(GitError::from_error)?;
