@@ -1,0 +1,183 @@
+docs/superpowers/specs/2026-07-29-gix-migration-design.md
+  s_2cff1b0a0bd54b::t_410f33279dd0d7 1-21,27-35,38,41-43,47-55,59-62,64-98,106-135
+  s_2cff1b0a0bd54b::t_bedf450d57f079 22-26,36-37,39-40,44-46,56-58,99-102,104-105,137-139
+  s_2cff1b0a0bd54b::t_f4194f6c9c9e3a 63,103,136,140-142
+package.json
+  s_1c3e3d2bb900a5::t_b48f3902639db3 21
+Cargo.lock
+  s_2cff1b0a0bd54b::t_a2404dda6dcef7 71-76,136-150,235-255,280-290,297-302,309-314,403-411,457-480,537-550,557-587,609-614,637-645,662-671,684-693,700-711,737-1626,1628-1634,1636-1644,1648-1649,1651-1662,1665-1666,1668,1670-1674,1678-1679,1681-1687,1690-1691,1693,1695,1699-1700,1702-1715,1718-1719,1721-1733,1736-1737,1739,1741-1750,1754-1755,1757,1759-1760,1764-1765,1767,1769,1773-1774,1776-1782,1784-1786,1794-1808,1861-1866,1942-1952,1967-2019,2053-2061,2080-2088,2124,2148,2200-2205,2227-2249,2262-2276,2295-2305,2373-2381,2426,2445-2459,2555-2564,2576-2581,2588-2597,2636-2641,2715-2729,2867-2881,2888-2896,2927-2936,2997-3027,3128-3133
+Cargo.toml
+  s_2cff1b0a0bd54b::t_167cb6346d7893 36
+crates/mt-core/Cargo.toml
+  s_2cff1b0a0bd54b::t_25c4598b7a8eea 20
+  s_2cff1b0a0bd54b::t_b3dc3e1141e697 9,11
+  s_2cff1b0a0bd54b::t_63c0465c388664 10,21
+crates/mt-core/src/git/error.rs
+  s_2cff1b0a0bd54b::t_c3ede62ce36a82 1-25
+crates/mt-core/src/git/mod.rs
+  s_2cff1b0a0bd54b::t_ccef48dd1ac65b 1-5,13-16,26-38,324-329
+  s_2cff1b0a0bd54b::t_c1d3cd36bce307 76-86,90-97,99-104,113-131
+  s_2cff1b0a0bd54b::t_81ab3fd7cf0ca9 87-89,132
+  s_2cff1b0a0bd54b::t_8353f0bcd32d7e 304-323
+  s_2cff1b0a0bd54b::t_d1b1b450e0f453 133,330-333,335-343,345-348,377-378
+  s_2cff1b0a0bd54b::t_818670eefa81a6 349-353,355-366
+  s_2cff1b0a0bd54b::t_f8e63dd63abcc0 98,344,367-376
+  s_2cff1b0a0bd54b::t_df0901ec2f9d92 134
+  s_2cff1b0a0bd54b::t_92c9799266f682 135,142-154,156-163
+  s_2cff1b0a0bd54b::t_9533c2c688464e 136-141,155
+  s_2cff1b0a0bd54b::t_b2f55b339ea6d5 9-12,164-206
+  s_2cff1b0a0bd54b::t_4fac8e8fb20aaa 207-209
+  s_2cff1b0a0bd54b::t_4a2c182fe90361 6-8
+  s_2cff1b0a0bd54b::t_4094589b16702d 17-25,39-52
+  s_0f9f5a6359bf71::t_d1f54581cb0d08 53-54
+  s_2cff1b0a0bd54b::t_c6250190bd60d7 55-75
+  s_2cff1b0a0bd54b::t_849aaf20e280fa 210-232
+  s_2cff1b0a0bd54b::t_a07d4c06068f99 233
+  s_2cff1b0a0bd54b::t_64dc38297636f1 236,238
+  s_2cff1b0a0bd54b::t_2f50e36cb81226 105-112
+  s_2cff1b0a0bd54b::t_1097ddc2911e92 234-235,243-246,249-252,254,265-266
+  s_2cff1b0a0bd54b::t_d9b41652d84c28 237,239-242,247-248,253,261
+  s_2cff1b0a0bd54b::t_ebcf83604717d6 334,354
+  s_2cff1b0a0bd54b::t_a78b0bcff5b864 255-260,262-264
+  s_2cff1b0a0bd54b::t_f530e15d1513ae 271-281
+  s_2cff1b0a0bd54b::t_6e8147dd81979f 267-270,282-298
+  s_2cff1b0a0bd54b::t_3ef742c4998f3f 299-303
+crates/mt-core/src/git/refs.rs
+  s_2cff1b0a0bd54b::t_303d7abe841524 1-58
+crates/mt-core/src/lib.rs
+  s_2cff1b0a0bd54b::t_494ca2d05dcdcf 12
+  s_2cff1b0a0bd54b::t_8353f0bcd32d7e 777-778,780-782
+  s_2cff1b0a0bd54b::t_b3dc3e1141e697 21-23
+crates/mt-core/tests/git_boundary.rs
+  s_2cff1b0a0bd54b::t_1c731c522b7ce2 1,3-17
+  s_2cff1b0a0bd54b::t_b44f6d7cfe2f19 2,28-32
+  s_2cff1b0a0bd54b::t_11c6550baab6dc 18-19,21-25,27,33-42,43-47,49-59
+  s_2cff1b0a0bd54b::t_dbe4996346942e 20,26,48
+crates/mt-napi/src/plan.rs
+  s_2cff1b0a0bd54b::t_1c0a5d8721fb13 71,116-118
+npm/mt-napi/package.json
+  s_2cff1b0a0bd54b::t_11943ee833c977 14-15
+packages/mt-darwin-arm64/package.json
+  s_2cff1b0a0bd54b::t_4b2ac51b8581a3 11-12
+packages/mt-linux-x64/package.json
+  s_2cff1b0a0bd54b::t_e823be4033e980 11-12
+docs/superpowers/plans/2026-07-29-gix-migration.md
+  s_2cff1b0a0bd54b::t_118fc52222038d 1-10,22-27,29-105,107-108,110-115,117-126,128-132,134,136,138-142,144-153,155-159,161-168,170,172-174,176-178,180-184,186-345,347-354,356-360,362-364,366-370,372-385,387-394,396-439
+  s_2cff1b0a0bd54b::t_f8e63dd63abcc0 106,109,116,127,133,135,137,143
+  s_2cff1b0a0bd54b::t_4790eef92faf9c 154,160,169,171,175,179,185
+  s_2cff1b0a0bd54b::t_72cb31eb019163 11-18,21,28
+  s_2cff1b0a0bd54b::t_f4194f6c9c9e3a 19-20,346,355,361,365,371,386,395
+crates/mt-core/src/claims.rs
+  s_2cff1b0a0bd54b::t_8353f0bcd32d7e 47-49
+  s_2cff1b0a0bd54b::t_92c9799266f682 183-185
+  s_2cff1b0a0bd54b::t_f081b23823ac0f 439-441,443-444
+  s_2cff1b0a0bd54b::t_b2f55b339ea6d5 251-257,264-269
+  s_2cff1b0a0bd54b::t_18fb56375dc54e 5
+  s_2cff1b0a0bd54b::t_8de71a25d437cc 445-446
+  s_2cff1b0a0bd54b::t_4a2c182fe90361 14-17,202-204,243-245
+  s_2cff1b0a0bd54b::t_ebcf83604717d6 278,360,393,395-396,399,401-402,442
+crates/mt/src/commands/doctor.rs
+  s_2cff1b0a0bd54b::t_8353f0bcd32d7e 39-42
+crates/mt-core/src/worktree.rs
+  s_2cff1b0a0bd54b::t_615bc2344b0d83 129
+  s_2cff1b0a0bd54b::t_faa955569b4838 10
+  s_2cff1b0a0bd54b::t_88aa8ce4890a77 12-15,67-68,79-81
+  s_2cff1b0a0bd54b::t_bd3b1ea6182ecf 56,58-60,94,100,117,119-121,212-214
+  s_2cff1b0a0bd54b::t_2ddd0b5c7dc7b2 224-225,230,252,259
+  s_2cff1b0a0bd54b::t_ca72ee8cf26e84 337,340,359-360,362-363,366,368-369,432-435,486,488-489,499,509,511-512
+crates/mt-core/src/git/compat.rs
+  s_2cff1b0a0bd54b::t_4a2c182fe90361 2,6-8,80-154,266-268
+  s_2cff1b0a0bd54b::t_f02c531975d067 269-271
+  s_2cff1b0a0bd54b::t_4094589b16702d 9-18,28-64,272-285
+  s_2cff1b0a0bd54b::t_05f5d42c69f237 286-288
+  s_2cff1b0a0bd54b::t_c6250190bd60d7 19-27,66-76
+  s_2cff1b0a0bd54b::t_97c055a13ea1db 77-80
+  s_2cff1b0a0bd54b::t_2eed85d93a507d 213-216,218-220,222-226,233-236,238-240,242-253,262
+  s_2cff1b0a0bd54b::t_3911a3ba0b1622 158-160,171-184,191-194,196-212,217,221,227-232,237,241
+  s_2cff1b0a0bd54b::t_b3ffd92c9fc23f 254-256,258-261,263,305
+  s_2cff1b0a0bd54b::t_e37f31f9a13682 257
+  s_2cff1b0a0bd54b::t_73de17656b86fd 170,185-190,195,264-265,306
+  s_2cff1b0a0bd54b::t_bd3b1ea6182ecf 155-157,161-169,289-302
+  s_2cff1b0a0bd54b::t_b00e1469d3350f 303-304
+  s_2cff1b0a0bd54b::t_bedf450d57f079 1,3-5
+crates/mt-core/src/runner.rs
+  s_2cff1b0a0bd54b::t_4094589b16702d 493-498
+  s_2cff1b0a0bd54b::t_3d74bd81646f9f 38,610-616
+  s_2cff1b0a0bd54b::t_ebcf83604717d6 848-849,1012,1014-1015,1069-1070
+crates/agent-server/src/graph.rs
+  s_2cff1b0a0bd54b::t_41cf9ed55850c7 69
+  s_2cff1b0a0bd54b::t_4a2d8aae89f9cf 70-74
+  s_2cff1b0a0bd54b::t_39a27b3cb25413 19,75-76,211,286,334
+  s_2cff1b0a0bd54b::t_c6250190bd60d7 287-294
+  s_2cff1b0a0bd54b::t_fe40d68a37893d 295-297
+  s_2cff1b0a0bd54b::t_3d74bd81646f9f 106-112,118-122
+  s_2cff1b0a0bd54b::t_83d0da2c589533 123-125
+  s_2cff1b0a0bd54b::t_16f4a337859ec4 281-283
+  s_2cff1b0a0bd54b::t_9ef85a1113c10e 605,607,700-701
+  s_2cff1b0a0bd54b::t_9c35ea85c8893a 350,362,365-366,375
+  s_2cff1b0a0bd54b::t_f530e15d1513ae 431
+  s_2cff1b0a0bd54b::t_1da403cce092ca 395,399-403,430,444-445,468-469
+  s_2cff1b0a0bd54b::t_e32c6662fb76ef 438-441,443,446-448,502-506,513-517,535-539,609,688-691,693-699,702-704
+crates/mt-core/src/publish.rs
+  s_2cff1b0a0bd54b::t_3911a3ba0b1622 11-12,14,110-111,120,125,137-138
+  s_2cff1b0a0bd54b::t_2eed85d93a507d 13,67,70-72,74-77,89-94,115
+  s_2cff1b0a0bd54b::t_8f75624b847d9d 126-130
+  s_2cff1b0a0bd54b::t_fdbca8ecfd329e 95-99,109,116,118-119,139-143,175
+  s_2cff1b0a0bd54b::t_ebcf83604717d6 182,220,235-236,238-240,242-243,277
+crates/mt-core/src/docs/claims.md
+  s_2cff1b0a0bd54b::t_bedf450d57f079 18,27,30,35,40
+crates/mt-core/src/test_support.rs
+  s_2cff1b0a0bd54b::t_2f50e36cb81226 8-15,18-24,29-33,52-54,56-57,61-63,65,100-101,104-118,120-121,127-130
+  s_2cff1b0a0bd54b::t_f5bb65b75c9890 43,50-51
+  s_2cff1b0a0bd54b::t_ebcf83604717d6 6,34-38,42,44-49
+  s_2cff1b0a0bd54b::t_1097ddc2911e92 25-28,39-41,55,58-60,64,66-69
+  s_2cff1b0a0bd54b::t_82600c0020344a 4
+  s_2cff1b0a0bd54b::t_363107211af863 91-96
+  s_2cff1b0a0bd54b::t_6e8147dd81979f 72-79
+crates/agent-server/Cargo.toml
+  s_2cff1b0a0bd54b::t_b3dc3e1141e697 28
+crates/mt/tests/common/mod.rs
+  s_2cff1b0a0bd54b::t_8a69fe3084ce87 7
+crates/agent-server/tests/graph_wiring.rs
+  s_2cff1b0a0bd54b::t_13d08cf34ea47d 11,150-161
+  s_2cff1b0a0bd54b::t_4664a888df3a23 31,34-35,55,111-118,144-148
+crates/mt/Cargo.toml
+  s_2cff1b0a0bd54b::t_8a69fe3084ce87 22
+crates/agent-server/tests/handoff_ws.rs
+  s_2cff1b0a0bd54b::t_bf6941458e194f 31,34-35
+  s_2cff1b0a0bd54b::t_097ca39694e939 12
+crates/mt/tests/cli.rs
+  s_2cff1b0a0bd54b::t_8a69fe3084ce87 180-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "885d97e5cb92f4fd133fc8c46a14aa18cdf45770",
+  "prompts": {},
+  "sessions": {
+    "s_0f9f5a6359bf71": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "019faa18-22a7-7b50-bb68-94475d98aee1",
+        "model": "unknown"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    },
+    "s_1c3e3d2bb900a5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabd8-445d-7d72-8c59-1f0206f25f53",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    },
+    "s_2cff1b0a0bd54b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabf1-2c1e-7cc2-a532-c78e7e3b7fbd",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
