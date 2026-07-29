@@ -10,6 +10,7 @@
 //! git.md: у `main` він не потрапляє ніколи.
 
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::process::Command;
 
 use chrono::{Duration, Utc};
@@ -67,6 +68,7 @@ pub struct InteractiveRun {
     approvals: Vec<String>,
 }
 
+#[cfg(test)]
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
         .arg("-C")
@@ -296,7 +298,9 @@ impl InteractiveRun {
 
         // Remote run ref стоїть на останньому запушеному ході (HEAD ДО
         // артефакт/strip-комітів) — саме його очікує force-with-lease.
-        let run_ref_sha = git(&self.worktree, &["rev-parse", "HEAD"])?;
+        let run_ref_sha = GitRepository::open(&self.worktree)
+            .and_then(|repository| repository.resolve_ref("HEAD"))
+            .map_err(|error| error.to_string())?;
 
         self.write_run_artifacts()?;
         commit_all(&self.worktree, &format!("mt: {} run (success)", self.node))?;
