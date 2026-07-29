@@ -189,53 +189,15 @@ fn claim_yaml(f: &ClaimFields) -> String {
     )
 }
 
-/// Як [`git`], але пише `stdin` у дочірній процес (для `hash-object`/`mktree`).
-fn git_stdin(repo: &Path, args: &[&str], stdin: &str) -> Result<String, String> {
-    use std::io::Write;
-    use std::process::Stdio;
-
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
-    child
-        .stdin
-        .take()
-        .expect("stdin piped")
-        .write_all(stdin.as_bytes())
-        .map_err(|e| format!("git {}: write stdin: {e}", args.join(" ")))?;
-    let out = child
-        .wait_with_output()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
 /// Пише claim-коміт (blob → tree → commit-tree) без checkout/індексу —
 /// придатне для headless runner без робочого дерева проєкту. `parent` —
 /// `base_sha` для першого claim, попередній claim-коміт для renew/takeover
 /// (спека: «Новий claim commit має parent = попередній claim commit»).
 fn create_claim_commit(repo: &Path, parent: &str, fields: &ClaimFields) -> Result<String, String> {
-    let blob_sha = git_stdin(repo, &["hash-object", "-w", "--stdin"], &claim_yaml(fields))?;
-    let tree_entry = format!("100644 blob {blob_sha}\t.mt-claim.yml\n");
-    let tree_sha = git_stdin(repo, &["mktree"], &tree_entry)?;
     let message = format!("mt: claim {}", fields.node);
-    let commit_sha = git(
-        repo,
-        &["commit-tree", &tree_sha, "-p", parent, "-m", &message],
-    )?;
-    Ok(commit_sha.trim().to_string())
+    GitRepository::open(repo)
+        .and_then(|repository| repository.write_claim_commit(parent, &claim_yaml(fields), &message))
+        .map_err(|error| error.to_string())
 }
 
 /// Підсумок CAS-push claim ref. `accepted: false` — інший runner виграв

@@ -72,6 +72,35 @@ impl GitRepository {
             .map(|mut blob| blob.take_data())
     }
 
+    /// Створює commit з одним `.mt-claim.yml` без checkout або index.
+    pub fn write_claim_commit(
+        &self,
+        parent: &str,
+        yaml: &str,
+        message: &str,
+    ) -> Result<String, GitError> {
+        let blob = self.repo.write_blob(yaml).map_err(GitError::from_error)?;
+        let tree = gix::objs::Tree {
+            entries: vec![gix::objs::tree::Entry {
+                mode: gix::objs::tree::EntryKind::Blob.into(),
+                filename: ".mt-claim.yml".into(),
+                oid: blob.detach(),
+            }],
+        };
+        let tree = self.repo.write_object(tree).map_err(GitError::from_error)?;
+        let parent = gix::ObjectId::from_hex(parent.as_bytes()).map_err(GitError::from_error)?;
+        let signature = gix::actor::SignatureRef {
+            name: b"mt".as_slice().into(),
+            email: b"mt@localhost".as_slice().into(),
+            time: "0 +0000",
+        };
+        let commit = self
+            .repo
+            .new_commit_as(signature, signature, message, tree, [parent])
+            .map_err(GitError::from_error)?;
+        Ok(commit.id.to_string())
+    }
+
     /// Повертає імена головного та всіх доступних linked worktree.
     pub fn linked_worktrees(&self) -> Result<Vec<String>, GitError> {
         let main_repo = self.repo.main_repo().map_err(GitError::from_error)?;
