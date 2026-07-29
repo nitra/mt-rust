@@ -92,17 +92,17 @@ git commit -m "feat(git): add gix facade boundary"
 
 **Files:**
 - Modify: `crates/mt-core/src/git/mod.rs`
-- Modify: `crates/mt-core/src/claims.rs:40-47,336-365`
+- Modify: `crates/mt-core/src/claims.rs:40-47`
 - Modify: `crates/mt/src/commands/doctor.rs:31-53`
 - Modify: `crates/mt-core/src/lib.rs:775-790`
-- Test: `crates/mt-core/tests/git_repository.rs`
+- Test: `crates/mt-core/src/git/mod.rs`
 - Test: `crates/mt/tests/cli.rs`
 
 **Interfaces:**
 - Consumes: `GitRepository` and typed refs from Task 1.
 - Produces: `repo_root()`, `origin_url()`, `resolve_ref()`, `read_blob_at_commit()`, `linked_worktrees()`.
 
-- [ ] **Step 1: Write failing repository tests**
+- [x] **Step 1: Write failing repository tests**
 
 ```rust
 #[test]
@@ -113,23 +113,23 @@ fn origin_is_none_without_remote_and_a_url_when_configured() { /* fixture */ }
 fn resolve_ref_and_read_blob_do_not_shell_out() { /* fixture */ }
 ```
 
-- [ ] **Step 2: Confirm failure**
+- [x] **Step 2: Confirm failure**
 
 Run: `cargo test -p mt-core --test git_repository`
 
 Expected: FAIL because the facade read methods do not exist.
 
-- [ ] **Step 3: Implement native gix reads**
+- [x] **Step 3: Implement native gix reads**
 
-Use `gix::discover()` to open from any task/worktree path, `main_repo()` for the shared repository, `find_remote("origin")` for doctor, `try_find_reference()` plus object lookup for SHA/blob reads, and `Repository::worktrees()` for inventory. Replace porcelain parsing and `git rev-parse`, `git show`, `git remote get-url`, and `git worktree list` readers.
+Use `gix::discover()` to open from any task/worktree path, `main_repo()` for the shared repository, `find_remote("origin")` for doctor, `try_find_reference()` plus object lookup for SHA/blob reads, and `Repository::worktrees()` for inventory. Replace porcelain parsing, `git rev-parse`, `git remote get-url`, and `git worktree list` readers. Claim `git show` moves with Task 3.
 
-- [ ] **Step 4: Verify CLI behavior**
+- [x] **Step 4: Verify CLI behavior**
 
 Run: `cargo test -p mt-core --test git_repository && cargo test -p mt --test cli doctor worktree -- --nocapture`
 
 Expected: PASS; missing origin remains a doctor failure with the existing user-facing text.
 
-- [ ] **Step 5: Docs, gate and commit**
+- [x] **Step 5: Docs, gate and commit**
 
 Run: `npx @7n/rules lint doc-files && npx @7n/rules lint changelog`
 
