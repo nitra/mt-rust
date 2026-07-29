@@ -1,0 +1,22 @@
+crates/mt-core/src/claims.rs
+  s_2cff1b0a0bd54b::t_92c9799266f682 198-200
+crates/mt-core/src/git/mod.rs
+  s_2cff1b0a0bd54b::t_92c9799266f682 75,82-94,96-103
+  s_2cff1b0a0bd54b::t_9533c2c688464e 76-81,95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "407b4b3c82a57c249f8f37033df87f3ee33a0ad2",
+  "prompts": {},
+  "sessions": {
+    "s_2cff1b0a0bd54b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabf1-2c1e-7cc2-a532-c78e7e3b7fbd",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
