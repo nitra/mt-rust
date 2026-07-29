@@ -2,52 +2,18 @@
 //! журнал у run ref, DoneSession → fenced publish, ReleaseSession → пауза.
 //! Все герметично: bare-репо як origin, скриптований runner, реальний WS.
 
-use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
 
 use agent_protocol::{Envelope, Event};
 use agent_server::{serve, AppState, ApprovalGate, GraphConfig, ScriptedTurnRunner, SessionHost};
 use chrono::Utc;
 use futures::SinkExt;
+use mt_core::test_support::{blob, commit_all, push_head, remote_refs, TestRepo};
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
 mod common;
 use common::next_json;
-
-fn sh(dir: &Path, args: &[&str]) {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "t@t.local")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "t@t.local")
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-fn sh_out(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
-}
 
 struct Fixture {
     #[allow(dead_code)]
@@ -62,19 +28,11 @@ impl Fixture {
     /// bare-origin + робочий клон із вузлом `mt/demo` + WS-сервер із
     /// graph-мостом і скриптованим runner-ом (по одній відповіді на хід).
     async fn start(responses: Vec<&str>) -> Self {
-        let origin = tempfile::tempdir().unwrap();
-        sh(origin.path(), &["init", "--bare", "-q", "-b", "main"]);
-        let work = tempfile::tempdir().unwrap();
-        sh(work.path(), &["init", "-q", "-b", "main"]);
+        let TestRepo { origin, work } = TestRepo::new();
         std::fs::create_dir_all(work.path().join("mt/demo")).unwrap();
         std::fs::write(work.path().join("mt/demo/task.md"), "## Task\n").unwrap();
-        sh(work.path(), &["add", "."]);
-        sh(work.path(), &["commit", "-q", "-m", "init"]);
-        sh(
-            work.path(),
-            &["remote", "add", "origin", origin.path().to_str().unwrap()],
-        );
-        sh(work.path(), &["push", "-q", "origin", "main"]);
+        commit_all(work.path(), "add task");
+        push_head(work.path(), "refs/heads/main");
 
         let state_dir = tempfile::tempdir().unwrap();
         let sessions = Arc::new(SessionHost::new(state_dir.path().to_path_buf()).unwrap());
@@ -94,7 +52,7 @@ impl Fixture {
     }
 
     fn remote_refs(&self) -> String {
-        sh_out(self.work.path(), &["ls-remote", "origin"])
+        remote_refs(self.work.path()).join("\n")
     }
 }
 
@@ -150,19 +108,14 @@ async fn user_message_attaches_and_done_publishes() {
     let mut journal = String::new();
     for _ in 0..50 {
         let refs = fixture.remote_refs();
-        if let Some(run_ref) = refs
-            .lines()
-            .find(|line| line.contains("refs/mt/runs/"))
-            .and_then(|line| line.split_whitespace().nth(1))
-        {
-            let out = Command::new("git")
-                .arg("-C")
-                .arg(fixture.origin.path())
-                .args(["show", &format!("{run_ref}:.nitra/session.jsonl")])
-                .output()
-                .unwrap();
-            if out.status.success() {
-                journal = String::from_utf8_lossy(&out.stdout).into_owned();
+        if let Some(run_ref) = refs.lines().find(|line| line.contains("refs/mt/runs/")) {
+            let repository = mt_core::git::GitRepository::open(fixture.origin.path()).unwrap();
+            if let Ok(commit) = repository.resolve_ref(run_ref) {
+                if let Ok(bytes) = repository.read_blob_at_commit(&commit, ".nitra/session.jsonl") {
+                    journal = String::from_utf8(bytes).unwrap();
+                }
+            }
+            if !journal.is_empty() {
                 break;
             }
         }
@@ -188,14 +141,24 @@ async fn user_message_attaches_and_done_publishes() {
     let refs = fixture.remote_refs();
     assert!(!refs.contains("refs/mt/claims/"), "{refs}");
     assert!(!refs.contains("refs/mt/runs/"), "{refs}");
-    let main_files = sh_out(
-        fixture.origin.path(),
-        &["ls-tree", "-r", "--name-only", "main"],
-    );
-    assert!(!main_files.contains(".nitra"), "{main_files}");
+    let main = mt_core::git::GitRepository::open(fixture.origin.path()).unwrap();
+    let main_sha = main.resolve_ref("refs/heads/main").unwrap();
+    assert!(main
+        .read_blob_at_commit(&main_sha, ".nitra/session.jsonl")
+        .is_err());
     // Контрактні артефакти спроби синтезовано (graph.md).
-    assert!(main_files.contains("mt/demo/run_001.md"), "{main_files}");
-    assert!(main_files.contains("mt/demo/fact_001.md"), "{main_files}");
+    assert!(blob(
+        fixture.origin.path(),
+        "refs/heads/main",
+        "mt/demo/run_001.md"
+    )
+    .contains("result"));
+    assert!(blob(
+        fixture.origin.path(),
+        "refs/heads/main",
+        "mt/demo/fact_001.md"
+    )
+    .contains("## Summary"));
 }
 
 /// ReleaseSession: пауза — claim знято (ClaimChanged без holder-а),

@@ -17,14 +17,13 @@ fn claim_and_run_ref_names_are_validated() {
 }
 
 #[test]
-fn compat_is_the_only_production_git_cli_boundary() {
+fn compat_is_the_only_git_cli_boundary() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
         .unwrap();
     let mut offenders = Vec::new();
-    scan_rust_sources(&root.join("crates/mt-core/src"), root, &mut offenders);
-    scan_rust_sources(&root.join("crates/agent-server/src"), root, &mut offenders);
+    scan_rust_sources(&root.join("crates"), root, &mut offenders);
 
     assert!(
         offenders.is_empty(),
@@ -41,14 +40,12 @@ fn scan_rust_sources(dir: &Path, root: &Path, offenders: &mut Vec<String>) {
             continue;
         }
         if path.extension().is_none_or(|extension| extension != "rs")
-            || path.ends_with("test_support.rs")
             || path.ends_with("git/compat.rs")
         {
             continue;
         }
         let source = std::fs::read_to_string(&path).unwrap();
-        let production = source.split("#[cfg(test)]").next().unwrap_or_default();
-        if production.contains("Command::new(\"git\")") {
+        if source.contains("Command::new(\"git\")") {
             offenders.push(relative(&path, root));
         }
     }

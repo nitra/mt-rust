@@ -1,7 +1,7 @@
 //! Герметичні git-фікстури для тестів `claims`/`publish` — bare-репозиторій
 //! як "origin" + звичайний клон з одним комітом на `main`. Тільки для тестів
 //! (`#[cfg(test)]`), нуль впливу на реальний runtime.
-#![cfg(test)]
+#![cfg(any(test, feature = "test-support"))]
 
 use std::{io::Write, path::Path};
 
@@ -69,6 +69,14 @@ pub fn remote_ref_exists(dir: &Path, reference: &str) -> bool {
         .unwrap()
 }
 
+/// Повертає назви refs, які рекламує `origin`.
+pub fn remote_refs(dir: &Path) -> Vec<String> {
+    GitRepository::open(dir)
+        .unwrap()
+        .advertised_remote_refs()
+        .unwrap()
+}
+
 /// Bare "origin" + звичайний клон із одним комітом на `main`, віддалений
 /// `origin` уже додано і запушено. Робочий клон — контекст для plumbing-команд
 /// (claim-коміти пишуться без touching робочого дерева/індексу).
@@ -78,6 +86,12 @@ pub struct TestRepo {
     #[allow(dead_code)]
     pub origin: tempfile::TempDir,
     pub work: tempfile::TempDir,
+}
+
+impl Default for TestRepo {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TestRepo {

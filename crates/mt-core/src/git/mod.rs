@@ -264,6 +264,43 @@ impl GitRepository {
             }))
     }
 
+    /// Повертає всі refs, які remote `origin` рекламує, без local fetch state.
+    pub fn advertised_remote_refs(&self) -> Result<Vec<String>, GitError> {
+        let remote = self
+            .repo
+            .find_remote("origin")
+            .map_err(GitError::from_error)?;
+        let mut options = gix::remote::ref_map::Options::default();
+        for refspec_text in [
+            "+refs/heads/*:refs/remotes/origin/*",
+            "+refs/mt/claims/*:refs/mt/claims/*",
+            "+refs/mt/runs/*:refs/mt/runs/*",
+        ] {
+            options.extra_refspecs.push(
+                gix::refspec::parse(refspec_text.into(), gix::refspec::parse::Operation::Fetch)
+                    .map_err(GitError::from_error)?
+                    .to_owned(),
+            );
+        }
+        let connection = remote
+            .connect(gix::remote::Direction::Fetch)
+            .map_err(GitError::from_error)?;
+        let prepared = connection
+            .prepare_fetch(gix::progress::Discard, options)
+            .map_err(GitError::from_error)?;
+        Ok(prepared
+            .ref_map()
+            .remote_refs
+            .iter()
+            .filter_map(|remote_ref| match remote_ref {
+                gix::protocol::handshake::Ref::Direct { full_ref_name, .. } => {
+                    Some(String::from_utf8_lossy(&full_ref_name[..]).into_owned())
+                }
+                _ => None,
+            })
+            .collect())
+    }
+
     /// Повертає імена головного та всіх доступних linked worktree.
     pub fn linked_worktrees(&self) -> Result<Vec<String>, GitError> {
         let main_repo = self.repo.main_repo().map_err(GitError::from_error)?;
