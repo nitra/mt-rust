@@ -1,0 +1,33 @@
+crates/mt-core/src/claims.rs
+  s_2cff1b0a0bd54b::t_8353f0bcd32d7e 15,45-47
+crates/mt-core/src/lib.rs
+  s_2cff1b0a0bd54b::t_8353f0bcd32d7e 776-777,779-781
+crates/mt/src/commands/doctor.rs
+  s_2cff1b0a0bd54b::t_8353f0bcd32d7e 39-42
+crates/mt-core/src/worktree.rs
+  s_2cff1b0a0bd54b::t_615bc2344b0d83 168
+crates/mt-core/src/git/mod.rs
+  s_2cff1b0a0bd54b::t_c1d3cd36bce307 6,24-34,38-45,47-71
+  s_2cff1b0a0bd54b::t_81ab3fd7cf0ca9 35-37,72
+  s_2cff1b0a0bd54b::t_8353f0bcd32d7e 75-94
+  s_2cff1b0a0bd54b::t_d1b1b450e0f453 73,101-104,106-114,116-119,148-149
+  s_2cff1b0a0bd54b::t_818670eefa81a6 105,120-137
+  s_2cff1b0a0bd54b::t_f8e63dd63abcc0 46,115,138-147
+  s_2cff1b0a0bd54b::t_df0901ec2f9d92 74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "801673cc6ef69945b37ca7844d0c2f0a19d71f9f",
+  "prompts": {},
+  "sessions": {
+    "s_2cff1b0a0bd54b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabf1-2c1e-7cc2-a532-c78e7e3b7fbd",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
