@@ -1,0 +1,33 @@
+crates/mt-core/src/worktree.rs
+  s_2cff1b0a0bd54b::t_bd3b1ea6182ecf 56,58-60,94,100,117,119-121,212-214
+  s_2cff1b0a0bd54b::t_2ddd0b5c7dc7b2 224-225,230,252,259
+crates/mt-core/src/git/compat.rs
+  s_2cff1b0a0bd54b::t_2eed85d93a507d 212-215,217-219,221-225,232-235,237-239,241-252,261
+  s_2cff1b0a0bd54b::t_3911a3ba0b1622 157-159,170-183,190-193,195-211,216,220,226-231,236,240
+  s_2cff1b0a0bd54b::t_b3ffd92c9fc23f 253-255,257-260,262,304
+  s_2cff1b0a0bd54b::t_e37f31f9a13682 256
+  s_2cff1b0a0bd54b::t_73de17656b86fd 169,184-189,194,263-264,305
+  s_2cff1b0a0bd54b::t_bd3b1ea6182ecf 154-156,160-168,288-301
+  s_2cff1b0a0bd54b::t_b00e1469d3350f 302-303
+crates/mt-core/src/publish.rs
+  s_2cff1b0a0bd54b::t_3911a3ba0b1622 11-12,14,110-111,120,125,137-138
+  s_2cff1b0a0bd54b::t_2eed85d93a507d 13,67,70-72,74-77,89-94,115
+  s_2cff1b0a0bd54b::t_8f75624b847d9d 126-130
+  s_2cff1b0a0bd54b::t_fdbca8ecfd329e 95-99,109,116,118-119,139-143,175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "9dcbf354d434da064f8930d44c60f15783c5e8ab",
+  "prompts": {},
+  "sessions": {
+    "s_2cff1b0a0bd54b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabf1-2c1e-7cc2-a532-c78e7e3b7fbd",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
