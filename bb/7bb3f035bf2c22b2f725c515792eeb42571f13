@@ -1,0 +1,37 @@
+crates/mt-core/src/git/mod.rs
+  s_2cff1b0a0bd54b::t_4094589b16702d 17-25,39-52
+  s_0f9f5a6359bf71::t_d1f54581cb0d08 53-54
+crates/mt-core/src/git/compat.rs
+  s_2cff1b0a0bd54b::t_4094589b16702d 8-54,136-149
+  s_2cff1b0a0bd54b::t_05f5d42c69f237 150-152
+crates/mt-core/src/runner.rs
+  s_2cff1b0a0bd54b::t_4094589b16702d 509-514
+crates/agent-server/src/graph.rs
+  s_2cff1b0a0bd54b::t_41cf9ed55850c7 87
+  s_2cff1b0a0bd54b::t_4a2d8aae89f9cf 88-92
+  s_2cff1b0a0bd54b::t_39a27b3cb25413 20,93-94,227,300,344
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "bb7bb3f035bf2c22b2f725c515792eeb42571f13",
+  "prompts": {},
+  "sessions": {
+    "s_0f9f5a6359bf71": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "019faa18-22a7-7b50-bb68-94475d98aee1",
+        "model": "unknown"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    },
+    "s_2cff1b0a0bd54b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabf1-2c1e-7cc2-a532-c78e7e3b7fbd",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
