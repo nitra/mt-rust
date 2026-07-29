@@ -1,0 +1,43 @@
+bun.lock
+  s_17cc6785a1bbb1::t_46643a6bb2d4f7 9,76,2160,2328,2330
+CHANGELOG.md
+  s_2cff1b0a0bd54b::t_a28f56f9afbb0d 1-15
+npm/mt-napi/.changes/260729-1027.md
+  s_2cff1b0a0bd54b::t_96e8b61a19d9e7 1-5
+npm/mt-napi/CHANGELOG.md
+  s_2cff1b0a0bd54b::t_03a704aeb0e761 1-3
+package.json
+  s_2cff1b0a0bd54b::t_fff30e16fdc83d 21
+packages/mt-darwin-arm64/.changes/260729-1027.md
+  s_2cff1b0a0bd54b::t_55964ade47a790 1-5
+packages/mt-darwin-arm64/CHANGELOG.md
+  s_2cff1b0a0bd54b::t_1422f1d690af0a 1-15
+packages/mt-linux-x64/.changes/260729-1027.md
+  s_2cff1b0a0bd54b::t_a9f6843c676880 1-5
+packages/mt-linux-x64/CHANGELOG.md
+  s_2cff1b0a0bd54b::t_b8596600f2b106 1-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "687db77e00e26fd3a07df607ad37b87a5a0b0fad",
+  "prompts": {},
+  "sessions": {
+    "s_17cc6785a1bbb1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "019fabf1-2c1e-7cc2-a532-c78e7e3b7fbd",
+        "model": "unknown"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    },
+    "s_2cff1b0a0bd54b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabf1-2c1e-7cc2-a532-c78e7e3b7fbd",
+        "model": "unknown"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
