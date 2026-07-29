@@ -1,0 +1,23 @@
+crates/mt-core/src/lib.rs
+  s_2cff1b0a0bd54b::t_b3dc3e1141e697 21-23
+crates/agent-server/Cargo.toml
+  s_2cff1b0a0bd54b::t_b3dc3e1141e697 28
+crates/mt-core/Cargo.toml
+  s_2cff1b0a0bd54b::t_b3dc3e1141e697 9-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "6cac2104ab4b9232689ef4e4942a39c1eb074061",
+  "prompts": {},
+  "sessions": {
+    "s_2cff1b0a0bd54b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabf1-2c1e-7cc2-a532-c78e7e3b7fbd",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
