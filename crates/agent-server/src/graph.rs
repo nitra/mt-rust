@@ -298,13 +298,17 @@ impl InteractiveRun {
 
         self.write_run_artifacts()?;
         commit_all(&self.worktree, &format!("mt: {} run (success)", self.node))?;
-        let tracked = git(&self.worktree, &["ls-files", ".nitra"])?;
-        if !tracked.is_empty() {
-            git(&self.worktree, &["rm", "-r", "-q", "--cached", ".nitra"])?;
-            git(
-                &self.worktree,
-                &["commit", "-q", "-m", "mt: strip session artifacts"],
-            )?;
+        let repository = GitRepository::open(&self.worktree).map_err(|error| error.to_string())?;
+        if repository
+            .remove_from_index(".nitra")
+            .map_err(|error| error.to_string())?
+        {
+            repository
+                .commit_staged_if_changed(
+                    "mt: strip session artifacts",
+                    SignaturePolicy::Configured,
+                )
+                .map_err(|error| error.to_string())?;
         }
         let request = PublishRequest {
             worktree: &self.worktree,

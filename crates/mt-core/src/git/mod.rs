@@ -52,6 +52,27 @@ impl GitRepository {
             .map(|id| Some(id.to_string()))
     }
 
+    /// Прибирає шлях лише з index, залишаючи його у worktree.
+    pub fn remove_from_index(&self, path: &str) -> Result<bool, GitError> {
+        compat::remove_from_index(&self.repo_root()?, path)
+    }
+
+    /// Комітить вже staged зміни або повертає `None`, якщо index чистий.
+    pub fn commit_staged_if_changed(
+        &self,
+        message: &str,
+        signature: SignaturePolicy,
+    ) -> Result<Option<String>, GitError> {
+        let worktree = self.repo_root()?;
+        if !compat::commit_staged_if_changed(&worktree, message, signature)? {
+            return Ok(None);
+        }
+        self.repo
+            .head_id()
+            .map_err(GitError::from_error)
+            .map(|id| Some(id.to_string()))
+    }
+
     /// Повертає абсолютний шлях робочого дерева репозиторію.
     pub fn repo_root(&self) -> Result<PathBuf, GitError> {
         self.repo

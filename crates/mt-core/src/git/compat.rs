@@ -15,6 +15,15 @@ pub fn commit_all_if_changed(
     signature: SignaturePolicy,
 ) -> Result<bool, GitError> {
     run(repo, ["add", "-A"])?;
+    commit_staged_if_changed(repo, message, signature)
+}
+
+/// Створює commit з уже staged index змінами.
+pub fn commit_staged_if_changed(
+    repo: &Path,
+    message: &str,
+    signature: SignaturePolicy,
+) -> Result<bool, GitError> {
     let staged = Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -51,6 +60,21 @@ pub fn commit_all_if_changed(
             String::from_utf8_lossy(&out.stderr).trim()
         )))
     }
+}
+
+/// Прибирає шлях лише з index, не видаляючи його з worktree.
+pub fn remove_from_index(repo: &Path, path: &str) -> Result<bool, GitError> {
+    run(
+        repo,
+        ["rm", "-r", "-q", "--cached", "--ignore-unmatch", path],
+    )?;
+    let staged = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["diff", "--cached", "--quiet"])
+        .status()
+        .map_err(|error| GitError::from_error(format!("git diff --cached: {error}")))?;
+    Ok(staged.code() == Some(1))
 }
 
 /// Публікує `new_target` у `refname` лише за очікуваного remote target.
