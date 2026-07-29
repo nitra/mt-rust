@@ -9,6 +9,7 @@ pub mod claims;
 pub mod config;
 pub mod directory;
 pub mod frontmatter;
+pub mod git;
 pub mod ledger;
 pub mod lifecycle;
 pub mod nnn;

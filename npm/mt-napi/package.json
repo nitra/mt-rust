@@ -11,7 +11,8 @@
   },
   "files": [
     "index.mjs",
-    "native.mjs"
+    "native.mjs",
+    "CHANGELOG.md"
   ],
   "optionalDependencies": {
     "@7n/mt-darwin-arm64": "0.1.1",
