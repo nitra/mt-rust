@@ -1,0 +1,25 @@
+crates/mt-core/src/git/mod.rs
+  s_2cff1b0a0bd54b::t_c6250190bd60d7 55-75
+crates/agent-server/src/graph.rs
+  s_2cff1b0a0bd54b::t_c6250190bd60d7 301-308
+  s_2cff1b0a0bd54b::t_fe40d68a37893d 309-311
+crates/mt-core/src/git/compat.rs
+  s_2cff1b0a0bd54b::t_c6250190bd60d7 18-26,65-75
+  s_2cff1b0a0bd54b::t_97c055a13ea1db 76-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "b0d14d8a1622e7f7db27fca7edf8591aa58168fe",
+  "prompts": {},
+  "sessions": {
+    "s_2cff1b0a0bd54b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabf1-2c1e-7cc2-a532-c78e7e3b7fbd",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
