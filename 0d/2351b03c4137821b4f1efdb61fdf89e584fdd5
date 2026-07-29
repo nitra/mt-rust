@@ -1,0 +1,41 @@
+Cargo.lock
+  s_2cff1b0a0bd54b::t_a2404dda6dcef7 71-76,136-150,235-255,280-290,297-302,309-314,403-411,457-480,537-550,557-587,609-614,637-645,662-671,684-693,700-711,737-1626,1628-1634,1636-1644,1648-1649,1651-1662,1665-1666,1668,1670-1674,1678-1679,1681-1687,1690-1691,1693,1695,1699-1700,1702-1715,1718-1719,1721-1733,1736-1737,1739,1741-1750,1754-1755,1757,1759-1760,1764-1765,1767,1769,1773-1774,1776-1782,1784-1786,1794-1808,1861-1866,1942-1952,1967-2019,2053-2061,2080-2088,2124,2148,2200-2205,2227-2249,2262-2276,2295-2305,2373-2381,2426,2445-2459,2555-2564,2576-2581,2588-2597,2636-2641,2715-2729,2867-2881,2888-2896,2927-2936,2997-3027,3128-3133
+Cargo.toml
+  s_2cff1b0a0bd54b::t_167cb6346d7893 36
+crates/mt-core/Cargo.toml
+  s_2cff1b0a0bd54b::t_25c4598b7a8eea 17
+crates/mt-core/src/git/error.rs
+  s_2cff1b0a0bd54b::t_c3ede62ce36a82 1-25
+crates/mt-core/src/git/mod.rs
+  s_2cff1b0a0bd54b::t_ccef48dd1ac65b 1-29
+crates/mt-core/src/git/refs.rs
+  s_2cff1b0a0bd54b::t_303d7abe841524 1-58
+crates/mt-core/src/lib.rs
+  s_2cff1b0a0bd54b::t_494ca2d05dcdcf 12
+crates/mt-core/tests/git_boundary.rs
+  s_2cff1b0a0bd54b::t_1c731c522b7ce2 1-16
+crates/mt-napi/src/plan.rs
+  s_2cff1b0a0bd54b::t_1c0a5d8721fb13 71,116-118
+npm/mt-napi/package.json
+  s_2cff1b0a0bd54b::t_11943ee833c977 14-15
+packages/mt-darwin-arm64/package.json
+  s_2cff1b0a0bd54b::t_4b2ac51b8581a3 11-12
+packages/mt-linux-x64/package.json
+  s_2cff1b0a0bd54b::t_e823be4033e980 11-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "0d2351b03c4137821b4f1efdb61fdf89e584fdd5",
+  "prompts": {},
+  "sessions": {
+    "s_2cff1b0a0bd54b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fabf1-2c1e-7cc2-a532-c78e7e3b7fbd",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
