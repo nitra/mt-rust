@@ -2,7 +2,7 @@
 //!
 //! Ownership вузла живе у GitHub custom refs `refs/mt/claims/<node-hash>`;
 //! claim ref вказує на commit із `.mt-claim.yml`. Модуль дає read-модель:
-//! node-hash, читання remote claims через git CLI і зіставлення з вузлами.
+//! node-hash, читання remote claims через native gix і зіставлення з вузлами.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -136,6 +136,7 @@ pub fn parse_claim(node_hash: &str, yaml: &str, grace_sec: i64, now: DateTime<Ut
     }
 }
 
+#[cfg(test)]
 fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
         .arg("-C")
@@ -299,28 +300,25 @@ pub fn release_claim(repo: &Path, node_hash: &str, claim_sha: &str) -> Result<bo
 /// Читає remote claims: `ls-remote` → fetch claim refs → `.mt-claim.yml` з
 /// кожного claim-коміта. `grace_sec` — буфер перед takeover (`claim_grace_sec`).
 pub fn fetch_remote_claims(repo_root: &Path, grace_sec: i64) -> Result<Vec<ClaimInfo>, String> {
-    let ls = git(
-        repo_root,
-        &["ls-remote", "origin", &format!("{CLAIM_REF_PREFIX}/*")],
-    )?;
-    let refs = parse_ls_remote(&ls, CLAIM_REF_PREFIX);
+    let repository = GitRepository::open(repo_root).map_err(|error| error.to_string())?;
+    let refs = repository
+        .fetch_claim_refs()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|(node_hash, sha)| RemoteClaimRef { node_hash, sha })
+        .collect::<Vec<_>>();
     if refs.is_empty() {
         return Ok(Vec::new());
     }
-    // Custom refs не покриваються стандартним refspec — тягнемо явно (спека).
-    git(
-        repo_root,
-        &[
-            "fetch",
-            "--quiet",
-            "origin",
-            &format!("+{CLAIM_REF_PREFIX}/*:{CLAIM_REF_PREFIX}/*"),
-        ],
-    )?;
     let now = Utc::now();
     let mut claims = Vec::new();
     for r in refs {
-        let yaml = git(repo_root, &["show", &format!("{}:.mt-claim.yml", r.sha)])?;
+        let yaml = String::from_utf8(
+            repository
+                .read_blob_at_commit(&r.sha, ".mt-claim.yml")
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| format!("claim YAML is not UTF-8: {error}"))?;
         claims.push(parse_claim(&r.node_hash, &yaml, grace_sec, now));
     }
     Ok(claims)
@@ -329,7 +327,7 @@ pub fn fetch_remote_claims(repo_root: &Path, grace_sec: i64) -> Result<Vec<Claim
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{output, TestRepo};
+    use crate::test_support::{output, run, TestRepo};
     use chrono::TimeZone;
 
     fn fields<'a>(node: &'a str, token: &'a str, base_sha: &'a str) -> ClaimFields<'a> {
@@ -495,6 +493,14 @@ mod tests {
         assert_eq!(claims[0].node.as_deref(), Some("research/analyze"));
         assert_eq!(claims[0].runner_id.as_deref(), Some("test-runner/1"));
         assert!(!claims[0].expired);
+    }
+
+    #[test]
+    fn fetch_remote_claims_reports_a_missing_origin() {
+        let repo = tempfile::tempdir().unwrap();
+        run(repo.path(), &["init", "-q", "-b", "main"]);
+
+        assert!(fetch_remote_claims(repo.path(), 60).is_err());
     }
 
     #[test]

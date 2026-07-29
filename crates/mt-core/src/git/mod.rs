@@ -3,7 +3,10 @@
 mod error;
 mod refs;
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
+};
 
 pub use error::GitError;
 pub use refs::{ClaimRef, RunRef};
@@ -99,6 +102,52 @@ impl GitRepository {
             .new_commit_as(signature, signature, message, tree, [parent])
             .map_err(GitError::from_error)?;
         Ok(commit.id.to_string())
+    }
+
+    /// Завантажує custom claim refs з `origin` і повертає їх advertised object IDs.
+    pub fn fetch_claim_refs(&self) -> Result<Vec<(String, String)>, GitError> {
+        let refspec_text = "+refs/mt/claims/*:refs/mt/claims/*";
+        let refspec =
+            gix::refspec::parse(refspec_text.into(), gix::refspec::parse::Operation::Fetch)
+                .map_err(GitError::from_error)?
+                .to_owned();
+        let remote = self
+            .repo
+            .find_remote("origin")
+            .map_err(GitError::from_error)?;
+        let mut options = gix::remote::ref_map::Options::default();
+        options.extra_refspecs.push(refspec);
+        let connection = remote
+            .connect(gix::remote::Direction::Fetch)
+            .map_err(GitError::from_error)?;
+        let prepared = connection
+            .prepare_fetch(gix::progress::Discard, options)
+            .map_err(GitError::from_error)?;
+        let refs = prepared
+            .ref_map()
+            .remote_refs
+            .iter()
+            .filter_map(|reference| match reference {
+                gix::protocol::handshake::Ref::Direct {
+                    full_ref_name,
+                    object,
+                } => {
+                    let name = String::from_utf8_lossy(full_ref_name.as_ref()).into_owned();
+                    name.strip_prefix("refs/mt/claims/")
+                        .filter(|name| !name.is_empty() && !name.contains('/'))
+                        .map(|name| (name.to_string(), object.to_string()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        if refs.is_empty() {
+            return Ok(refs);
+        }
+        prepared
+            .receive(gix::progress::Discard, &AtomicBool::new(false))
+            .map_err(GitError::from_error)?;
+        Ok(refs)
     }
 
     /// Повертає імена головного та всіх доступних linked worktree.
