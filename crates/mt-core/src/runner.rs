@@ -28,7 +28,8 @@ use std::time::{Duration, Instant, SystemTime};
 use serde::{Deserialize, Serialize};
 
 use crate::claims::{
-    acquire_claim, discover_repo_root, node_hash, tasks_root_relative, ClaimFields,
+    acquire_claim, discover_main_worktree_root, discover_repo_root, node_hash, tasks_root_relative,
+    ClaimFields,
 };
 use crate::config::{
     agent_cli_env_from_process, merge_config, normalize_model_tier, resolve_model_for_cli,
@@ -600,6 +601,13 @@ pub fn run_node_env(
     let repo_root = discover_repo_root(Path::new(tasks_dir))?;
     let tasks_root_rel = tasks_root_relative(&repo_root, Path::new(tasks_dir))?;
     let hash = node_hash(&tasks_root_rel, node_path);
+    // Ephemeral run-worktree — repo-wide shared placement (те саме адмін-дерево
+    // `.git/worktrees/`, що й у `mt worktree create`): якщо `mt run` викликано
+    // зсередини linked dev-worktree, `repo_root` вище — корінь *цього*
+    // checkout-у (правильно для `tasks_root_rel`/claims), а не головного репо —
+    // тож для фізичного розташування нового worktree потрібен окремий,
+    // main-scoped корінь, інакше він вкладеться під `.worktrees/<цей-worktree>/`.
+    let main_root = discover_main_worktree_root(&repo_root)?;
 
     let raw_config = fs::read_to_string(repo_root.join(".mt.json")).ok();
     let config = merge_config(raw_config.as_deref());
@@ -637,8 +645,8 @@ pub fn run_node_env(
         return Err("claim-lost: інший runner уже володіє цим вузлом".to_string());
     }
 
-    let worktrees_dir = worktrees_dir_path(&repo_root, &config);
-    let worktree = create_run_worktree(&repo_root, &worktrees_dir, &hash, &token, &base_sha)?;
+    let worktrees_dir = worktrees_dir_path(&main_root, &config);
+    let worktree = create_run_worktree(&main_root, &worktrees_dir, &hash, &token, &base_sha)?;
     push_run_ref(&worktree, &hash, &token)?;
 
     let wt_tasks_dir = worktree.join(&tasks_root_rel);
@@ -1018,6 +1026,56 @@ mod tests {
         let run = fs::read_to_string(root.join("solo/run_001.md")).unwrap();
         assert!(run.contains("result: success"));
         assert!(run.contains("agent_cli: claude"));
+    }
+
+    #[test]
+    fn run_from_inside_a_linked_worktree_places_ephemeral_worktree_under_main_root() {
+        // `mt run`, викликаний з cwd усередині dev-worktree (а не головного
+        // checkout-у), не повинен вкладати ephemeral run-worktree під
+        // `.worktrees/` *цього* worktree — фізичне розташування має бути
+        // repo-wide, під головним коренем (той самий нюанс, що й `mt
+        // worktree create`, див. `discover_main_worktree_root`).
+        use crate::worktree::create_dev_worktree;
+
+        let repo = TestRepo::new();
+        let root = repo.work.path().join("mt");
+        node(&root, "solo");
+
+        let worktrees_dir = tempfile::tempdir().unwrap();
+        let devwork =
+            create_dev_worktree(repo.work.path(), worktrees_dir.path(), "devwork", "main").unwrap();
+        let devwork_tasks_dir = devwork.path.join("mt");
+        assert!(devwork_tasks_dir.join("solo/task.md").is_file());
+
+        let marker = tempfile::NamedTempFile::new().unwrap();
+        let marker_path = marker.path().to_path_buf();
+        std::env::set_var("MT_TEST_RUN_WORKTREE_PWD_MARKER", &marker_path);
+
+        let r = devwork_tasks_dir.to_string_lossy().into_owned();
+        with_path_shims(
+            &[(
+                "claude",
+                r#"pwd > "$MT_TEST_RUN_WORKTREE_PWD_MARKER"
+printf -- '---\nschema_version: 1\n---\n\n## Summary\n\nok\n' > "fact_${MT_RUN_NNN}.md""#,
+            )],
+            || {
+                let out = run_node_env(&r, "solo", &env_default()).unwrap();
+                assert_eq!(out.result, "success");
+            },
+        );
+        std::env::remove_var("MT_TEST_RUN_WORKTREE_PWD_MARKER");
+
+        let captured_cwd = fs::read_to_string(&marker_path).unwrap();
+        let captured_cwd = captured_cwd.trim();
+        assert!(
+            !captured_cwd.contains("/.worktrees/devwork/.worktrees/"),
+            "ephemeral run-worktree nested under the linked worktree instead of the main root: {captured_cwd}"
+        );
+
+        // Головний репо-корінь отримав `.worktrees/<hash>-<token>` (успішний
+        // run прибирає worktree по завершенню — перевіряємо, що nested-шлях
+        // під devwork так і не з'явився).
+        assert!(!devwork.path.join(".worktrees").exists());
     }
 
     #[test]

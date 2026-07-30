@@ -101,6 +101,16 @@ pub fn remove_worktree(repo_root: &Path, path: &Path, force: bool) -> Result<(),
     Ok(())
 }
 
+/// Стабільний JSON contract `mt worktree create`: `name`/`branch`/`path`
+/// достатні, щоб зовнішній оркестратор не перевідкривав git-стан повторним
+/// пошуком — усе, що потрібно для подальшого `remove`, уже тут.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreatedWorktree {
+    pub name: String,
+    pub branch: String,
+    pub path: PathBuf,
+}
+
 /// `mt worktree create <name>`: гілковий (не detached) worktree для ручної
 /// dev-роботи над задачею — `git worktree add -b <branch> <path> <base>`.
 pub fn create_dev_worktree(
@@ -108,7 +118,7 @@ pub fn create_dev_worktree(
     worktrees_dir: &Path,
     name: &str,
     base: &str,
-) -> Result<PathBuf, String> {
+) -> Result<CreatedWorktree, String> {
     let branch = dev_branch(name);
     let path = worktrees_dir.join(name);
     if let Some(parent) = path.parent() {
@@ -119,7 +129,11 @@ pub fn create_dev_worktree(
         &["add", "-b", &branch, &path.to_string_lossy(), base],
     )
     .map_err(|error| error.to_string())?;
-    Ok(path)
+    Ok(CreatedWorktree {
+        name: name.to_string(),
+        branch,
+        path,
+    })
 }
 
 /// Один запис `git worktree list --porcelain` (`mt worktree list`/`inventory`).
@@ -426,21 +440,52 @@ mod tests {
     fn create_dev_worktree_adds_branch_and_worktree() {
         let repo = TestRepo::new();
         let worktrees_dir = tempfile::tempdir().unwrap();
-        let path =
+        let created =
             create_dev_worktree(repo.work.path(), worktrees_dir.path(), "my-task", "main").unwrap();
-        assert!(path.join("README.md").is_file());
+        assert_eq!(created.branch, "mt/my-task");
+        assert!(created.path.join("README.md").is_file());
         assert_eq!(
-            crate::test_support::head_branch(&path).as_deref(),
+            crate::test_support::head_branch(&created.path).as_deref(),
             Some("refs/heads/mt/my-task")
         );
+    }
+
+    #[test]
+    fn created_worktree_outcome_is_enough_to_roll_back_without_git_search() {
+        // Контракт `mt --json worktree create`: `name`/`branch`/`path` з
+        // [`CreatedWorktree`] мають бути достатні, щоб побудувати
+        // [`WorktreeEntry`] і прибрати щойно створений worktree/branch без
+        // повторного `git worktree list` (транзакційний rollback CLI-шару
+        // при невдачі наступного metadata-кроку).
+        let repo = TestRepo::new();
+        let worktrees_dir = tempfile::tempdir().unwrap();
+        let created =
+            create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main").unwrap();
+
+        let entry = WorktreeEntry {
+            path: created.path.to_string_lossy().into_owned(),
+            name: created.name.clone(),
+            head: String::new(),
+            branch: Some(format!("refs/heads/{}", created.branch)),
+            locked: false,
+            prunable: false,
+        };
+        remove_dev_worktree(repo.work.path(), &entry, "demo", true).unwrap();
+
+        assert!(!created.path.exists());
+        assert!(crate::git::GitRepository::open(repo.work.path())
+            .unwrap()
+            .resolve_ref("refs/heads/mt/demo")
+            .is_err());
     }
 
     #[test]
     fn remove_worktree_without_force_fails_on_dirty_tree() {
         let repo = TestRepo::new();
         let worktrees_dir = tempfile::tempdir().unwrap();
-        let path =
-            create_dev_worktree(repo.work.path(), worktrees_dir.path(), "my-task", "main").unwrap();
+        let path = create_dev_worktree(repo.work.path(), worktrees_dir.path(), "my-task", "main")
+            .unwrap()
+            .path;
         std::fs::write(path.join("uncommitted.txt"), "x").unwrap();
         assert!(remove_worktree(repo.work.path(), &path, false).is_err());
         assert!(path.exists());
@@ -452,7 +497,7 @@ mod tests {
     fn inventory_includes_optional_branch_description() {
         let repo = TestRepo::new();
         let worktrees_dir = tempfile::tempdir().unwrap();
-        let _path =
+        let _created =
             create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main").unwrap();
         set_branch_description(repo.work.path(), "mt/demo", "Ізольований lint").unwrap();
 
@@ -468,8 +513,9 @@ mod tests {
     fn remove_dev_worktree_deletes_owned_branch_and_description() {
         let repo = TestRepo::new();
         let worktrees_dir = tempfile::tempdir().unwrap();
-        let path =
-            create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main").unwrap();
+        let path = create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main")
+            .unwrap()
+            .path;
         set_branch_description(repo.work.path(), "mt/demo", "Ізольований lint").unwrap();
         let entry = list_worktrees(repo.work.path())
             .unwrap()
@@ -493,8 +539,9 @@ mod tests {
     fn remove_dev_worktree_deletes_owned_unmerged_branch_without_force() {
         let repo = TestRepo::new();
         let worktrees_dir = tempfile::tempdir().unwrap();
-        let path =
-            create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main").unwrap();
+        let path = create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main")
+            .unwrap()
+            .path;
         std::fs::write(path.join("feature.txt"), "worktree-only change").unwrap();
         crate::test_support::commit_all(&path, "feature work");
         let entry = list_worktrees(repo.work.path())
@@ -516,8 +563,9 @@ mod tests {
     fn remove_dev_worktree_rejects_foreign_branch_before_removal() {
         let repo = TestRepo::new();
         let worktrees_dir = tempfile::tempdir().unwrap();
-        let path =
-            create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main").unwrap();
+        let path = create_dev_worktree(repo.work.path(), worktrees_dir.path(), "demo", "main")
+            .unwrap()
+            .path;
         let mut entry = list_worktrees(repo.work.path())
             .unwrap()
             .into_iter()

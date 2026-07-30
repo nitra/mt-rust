@@ -6,10 +6,12 @@ use std::path::Path;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-use crate::context::{project_config, repo_root, resolve_tasks_dir};
+use crate::context::{main_worktree_root, project_config, resolve_tasks_dir};
 
 #[napi(object)]
 pub struct WorktreeCreateResult {
+    pub name: String,
+    pub branch: String,
     pub path: String,
 }
 
@@ -22,7 +24,7 @@ pub fn worktree_create(
     description: Option<String>,
 ) -> Result<WorktreeCreateResult> {
     let tasks_dir = resolve_tasks_dir(root.as_deref())?;
-    let repo = repo_root(&tasks_dir)?;
+    let repo = main_worktree_root(&tasks_dir)?;
     let config = project_config(&tasks_dir);
     let worktrees_dir = repo.join(
         config["worktrees_dir"]
@@ -31,14 +33,16 @@ pub fn worktree_create(
             .trim_start_matches("./"),
     );
     let base = base.unwrap_or_else(|| "main".to_string());
-    let path = mt_core::worktree::create_dev_worktree(&repo, &worktrees_dir, &name, &base)
+    let created = mt_core::worktree::create_dev_worktree(&repo, &worktrees_dir, &name, &base)
         .map_err(Error::from_reason)?;
     if let Some(description) = description {
-        mt_core::worktree::set_branch_description(&repo, &format!("mt/{name}"), &description)
+        mt_core::worktree::set_branch_description(&repo, &created.branch, &description)
             .map_err(Error::from_reason)?;
     }
     Ok(WorktreeCreateResult {
-        path: path.to_string_lossy().into_owned(),
+        name: created.name,
+        branch: created.branch,
+        path: created.path.to_string_lossy().into_owned(),
     })
 }
 
@@ -55,7 +59,7 @@ pub fn worktree_remove(
     root: Option<String>,
 ) -> Result<WorktreeRemoveResult> {
     let tasks_dir = resolve_tasks_dir(root.as_deref())?;
-    let repo = repo_root(&tasks_dir)?;
+    let repo = main_worktree_root(&tasks_dir)?;
     let entries = mt_core::worktree::list_worktrees(&repo).map_err(Error::from_reason)?;
     let entry = entries
         .iter()
@@ -110,7 +114,7 @@ fn flatten<'a>(nodes: &'a [mt_core::TaskNode], out: &mut Vec<&'a mt_core::TaskNo
 #[napi]
 pub fn worktree_status(root: Option<String>) -> Result<Vec<WorktreeStatusItem>> {
     let tasks_dir = resolve_tasks_dir(root.as_deref())?;
-    let repo = repo_root(&tasks_dir)?;
+    let repo = main_worktree_root(&tasks_dir)?;
     let config = project_config(&tasks_dir);
     let worktrees = mt_core::discover_worktrees(Path::new(&tasks_dir));
     let tree = mt_core::scan_tasks(tasks_dir.clone(), worktrees).map_err(Error::from_reason)?;
