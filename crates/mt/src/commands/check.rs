@@ -6,7 +6,7 @@ use clap::Args;
 use mt_core::worktree::worktree_inventory;
 use mt_core::{discover_worktrees, scan_tasks, TaskNode, TaskState};
 
-use crate::context::{project_config, repo_root, resolve_tasks_dir};
+use crate::context::{git_root, project_config, resolve_tasks_dir};
 use crate::output::json;
 
 fn flatten<'a>(nodes: &'a [TaskNode], out: &mut Vec<&'a TaskNode>) {
@@ -45,7 +45,7 @@ pub fn run(_args: CheckArgs, as_json: bool) -> Result<(), String> {
     let config = project_config(&tasks_dir);
     let stale_min = config["stale_worktree_min"].as_u64().unwrap_or(30);
     let task_paths: Vec<String> = all.iter().map(|n| n.path.clone()).collect();
-    let stale_worktrees: Vec<String> = match repo_root(&tasks_dir) {
+    let stale_worktrees: Vec<String> = match git_root() {
         Ok(root) => worktree_inventory(&root, &task_paths, stale_min)
             .unwrap_or_default()
             .into_iter()

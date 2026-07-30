@@ -57,9 +57,24 @@ fn node_path_from_cwd(cwd: &Path, tasks_dir: &str) -> Result<String, String> {
     Ok(node_path)
 }
 
-/// Корінь git-репо (для worktree/claim-операцій), від `tasks_dir`.
-pub fn repo_root(tasks_dir: &str) -> Result<PathBuf, String> {
-    mt_core::claims::discover_repo_root(Path::new(tasks_dir))
+/// Корінь **головного** worktree репозиторію від поточного `cwd` (`--root`,
+/// якщо задано, уже застосований через [`apply_root`] до виклику команди) —
+/// незалежно від наявності MT task graph (`.mt.json`/`mt/`) і незалежно від
+/// того, чи cwd сам є linked dev-worktree (`mt worktree create`'s власний
+/// checkout): без цього `mt worktree create`, викликаний зсередини іншого
+/// worktree, вкладав би новий worktree під `.worktrees/` *того* worktree
+/// замість спільного `.worktrees/` головного репо. Для `worktree
+/// create|remove|list|prune`, яким граф задач не потрібен.
+pub fn git_root() -> Result<PathBuf, String> {
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    mt_core::claims::discover_main_worktree_root(&cwd)
+}
+
+/// Ефективний `.mt.json`, читаний напряму з `root` — без прив'язки до
+/// tasks_dir (яка може не існувати). `.mt.json` відсутній → чисті дефолти.
+pub fn project_config_at(root: &Path) -> serde_json::Value {
+    let raw = std::fs::read_to_string(root.join(".mt.json")).ok();
+    mt_core::config::merge_config(raw.as_deref())
 }
 
 /// Ефективний `.mt.json` проєкту (без per-node override-шарів — для

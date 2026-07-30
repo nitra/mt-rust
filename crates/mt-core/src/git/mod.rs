@@ -74,11 +74,34 @@ impl GitRepository {
     }
 
     /// Повертає абсолютний шлях робочого дерева репозиторію.
+    ///
+    /// Якщо `self` відкритий усередині **linked** worktree (`gix::discover`
+    /// зупиняється на першому `.git`, яким тут є `.git`-файл лінкованого
+    /// worktree) — повертає корінь **цього** worktree, а не головного
+    /// репозиторію. Для операцій, для яких важливий саме спільний
+    /// (`common`) корінь незалежно від того, звідки викликано команду,
+    /// використовуй [`Self::main_worktree_root`].
     pub fn repo_root(&self) -> Result<PathBuf, GitError> {
         self.repo
             .workdir()
             .map(Path::to_path_buf)
             .ok_or_else(|| GitError::from_error("bare repositories have no worktree"))
+    }
+
+    /// Корінь **головного** worktree репозиторію — той самий незалежно від
+    /// того, з якого linked worktree викликано команду (на відміну від
+    /// [`Self::repo_root`], який повертає корінь *поточного* worktree).
+    ///
+    /// Резолвиться через спільний (`common`) git-dir (`gix`
+    /// `Repository::main_repo`), який лінковані worktree завжди ділять із
+    /// головним — так само, як `git rev-parse --path-format=absolute
+    /// --git-common-dir` резолвить один і той самий шлях незалежно від cwd.
+    pub fn main_worktree_root(&self) -> Result<PathBuf, GitError> {
+        let main_repo = self.repo.main_repo().map_err(GitError::from_error)?;
+        main_repo
+            .workdir()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| GitError::from_error("головний репозиторій — bare, без worktree"))
     }
 
     /// Повертає fetch URL віддаленого `origin`, якщо він налаштований.

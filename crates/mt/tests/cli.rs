@@ -184,6 +184,130 @@ fn worktree_description_is_reported_and_owned_branch_is_removed() {
 }
 
 #[test]
+fn worktree_create_list_remove_work_without_task_graph() {
+    // Жодного `mt init` — репо не має `.mt.json`/`mt/`. `worktree` не повинен
+    // вимагати MT task graph: лише Git root.
+    let repo = TestRepo::new();
+    assert!(!repo.work.path().join(".mt.json").exists());
+    assert!(!repo.work.path().join("mt").exists());
+
+    let create = run(
+        repo.work.path(),
+        &[
+            "--json",
+            "worktree",
+            "create",
+            "smoke",
+            "--base",
+            "main",
+            "--description",
+            "smoke",
+        ],
+    );
+    assert!(create.status.success(), "{}", stdout(&create));
+    let created: serde_json::Value = serde_json::from_str(&stdout(&create)).unwrap();
+    assert_eq!(created["name"], "smoke");
+    assert_eq!(created["branch"], "mt/smoke");
+    let path = created["path"].as_str().unwrap();
+    assert!(std::path::Path::new(path).is_dir());
+
+    let list = run(repo.work.path(), &["--json", "worktree", "list"]);
+    assert!(list.status.success(), "{}", stdout(&list));
+    let entries: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
+    assert!(entries
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["name"] == "smoke" && e["branch"] == "refs/heads/mt/smoke"));
+
+    let prune = run(repo.work.path(), &["--json", "worktree", "prune"]);
+    assert!(prune.status.success(), "{}", stdout(&prune));
+
+    // Inventory без task graph — не падає, task-асоціація просто відсутня.
+    let inventory = run(repo.work.path(), &["--json", "worktree", "inventory"]);
+    assert!(inventory.status.success(), "{}", stdout(&inventory));
+    let items: serde_json::Value = serde_json::from_str(&stdout(&inventory)).unwrap();
+    assert!(items
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["name"] == "smoke" && i["task_path"].is_null()));
+
+    let remove = run(
+        repo.work.path(),
+        &["--json", "worktree", "remove", "smoke", "--force"],
+    );
+    assert!(remove.status.success(), "{}", stdout(&remove));
+    assert!(!std::path::Path::new(path).exists());
+    assert!(mt_core::git::GitRepository::open(repo.work.path())
+        .unwrap()
+        .resolve_ref("refs/heads/mt/smoke")
+        .is_err());
+
+    let list3 = run(repo.work.path(), &["--json", "worktree", "list"]);
+    let entries3: serde_json::Value = serde_json::from_str(&stdout(&list3)).unwrap();
+    assert!(!entries3
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["name"] == "smoke"));
+}
+
+#[test]
+fn worktree_create_from_inside_a_linked_worktree_targets_the_main_root() {
+    // `mt worktree create`, викликаний зсередини вже наявного dev-worktree
+    // (а не з головного checkout), має класти новий worktree під спільний
+    // `.worktrees/` головного репо — не вкладено під `.worktrees/`
+    // *поточного* worktree. Інакше `gix::discover(cwd).workdir()` мовчки
+    // резолвить корінь поточного checkout, і worktree-дерево розповзається
+    // рекурсивно замість плаского списку поруч.
+    let repo = TestRepo::new();
+    let create_first = run(
+        repo.work.path(),
+        &["--json", "worktree", "create", "devwork"],
+    );
+    assert!(create_first.status.success(), "{}", stdout(&create_first));
+    let devwork_dir = repo.work.path().join(".worktrees/devwork");
+    assert!(devwork_dir.is_dir());
+
+    let create_nested = run(
+        &devwork_dir,
+        &["--json", "worktree", "create", "nested-child"],
+    );
+    assert!(create_nested.status.success(), "{}", stdout(&create_nested));
+    let created: serde_json::Value = serde_json::from_str(&stdout(&create_nested)).unwrap();
+    let nested_path = std::path::PathBuf::from(created["path"].as_str().unwrap());
+
+    let expected = repo.work.path().join(".worktrees/nested-child");
+    assert_eq!(
+        nested_path.canonicalize().unwrap(),
+        expected.canonicalize().unwrap(),
+        "worktree must be created next to devwork under the main repo root, not nested inside it"
+    );
+    assert!(!devwork_dir.join(".worktrees").exists());
+
+    let list = run(repo.work.path(), &["--json", "worktree", "list"]);
+    let entries: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
+    let names: Vec<&str> = entries
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"devwork"));
+    assert!(names.contains(&"nested-child"));
+
+    // remove/prune, викликані з linked worktree, теж мають бачити повний
+    // репо-глобальний список, а не лише свій піддерево.
+    let remove = run(
+        &devwork_dir,
+        &["--json", "worktree", "remove", "nested-child", "--force"],
+    );
+    assert!(remove.status.success(), "{}", stdout(&remove));
+    assert!(!nested_path.exists());
+}
+
+#[test]
 fn spawn_approve_materializes_children_from_plan() {
     let repo = TestRepo::new();
     run(repo.work.path(), &["init", "research", "--mode", "human"]);

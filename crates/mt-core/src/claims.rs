@@ -43,9 +43,23 @@ pub fn node_hash(tasks_root: &str, node_path: &str) -> String {
 pub const RUN_REF_PREFIX: &str = "refs/mt/runs";
 
 /// Git top-level, що містить `tasks_dir` (`git rev-parse --show-toplevel`).
+///
+/// Якщо `tasks_dir` лежить усередині **linked** worktree — повертає корінь
+/// цього worktree, не головного репозиторію (пор. [`discover_main_worktree_root`]).
 pub fn discover_repo_root(tasks_dir: &Path) -> Result<PathBuf, String> {
     GitRepository::open(tasks_dir)
         .and_then(|repository| repository.repo_root())
+        .map_err(|error| error.to_string())
+}
+
+/// Корінь **головного** worktree репозиторію від будь-якого шляху всередині
+/// нього — той самий, незалежно від того, викликано з головного checkout чи
+/// з linked dev-worktree (`mt worktree create <name>`'s власного checkout).
+/// Для команд, чий результат має бути детермінований відносно проєкту в
+/// цілому, а не поточного worktree — `mt worktree create|remove|list|prune`.
+pub fn discover_main_worktree_root(start: &Path) -> Result<PathBuf, String> {
+    GitRepository::open(start)
+        .and_then(|repository| repository.main_worktree_root())
         .map_err(|error| error.to_string())
 }
 

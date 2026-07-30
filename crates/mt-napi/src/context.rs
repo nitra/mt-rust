@@ -17,8 +17,14 @@ pub fn resolve_tasks_dir(root: Option<&str>) -> Result<String> {
     mt_core::find_tasks_dir().map_err(Error::from_reason)
 }
 
-pub fn repo_root(tasks_dir: &str) -> Result<PathBuf> {
-    mt_core::claims::discover_repo_root(Path::new(tasks_dir)).map_err(Error::from_reason)
+/// Корінь **головного** worktree репозиторію, незалежно від того, чи
+/// `tasks_dir` лежить у linked dev-worktree (той самий нюанс, що й CLI
+/// `crate::context::git_root` — див. `crates/mt/src/context.rs`). Для
+/// worktree lifecycle-операцій (`create/remove/status`), де фізичне
+/// розташування worktree має бути repo-wide, а не прив'язане до checkout-у,
+/// звідки викликано binding.
+pub fn main_worktree_root(tasks_dir: &str) -> Result<PathBuf> {
+    mt_core::claims::discover_main_worktree_root(Path::new(tasks_dir)).map_err(Error::from_reason)
 }
 
 pub fn project_config(tasks_dir: &str) -> serde_json::Value {
