@@ -24,6 +24,7 @@ pub fn config_defaults() -> Value {
         "default_model_tier": "AVG",
         "budget_hard_sec_multiplier": 3,
         "progress_timeout_sec": 300,
+        "agent_retry_max": 3,
         "agent_concurrency": 5,
         "claim_lease_sec": 3600,
         "claim_grace_sec": 60,
@@ -176,6 +177,17 @@ mod tests {
         assert_eq!(cfg["mt_dir"], "./mt");
         assert_eq!(cfg["system_prompt"], ".mt/system-prompt.md");
         assert!(cfg.get("tasks_dir").is_none());
+    }
+
+    #[test]
+    fn agent_retry_max_has_a_default() {
+        // graph.md: «До agent_retry_max (3) вузол лишається waiting».
+        // Дефолт живе тут, а не хардкодом у читачі.
+        assert_eq!(merge_config(None)["agent_retry_max"], 3);
+        assert_eq!(
+            merge_config(Some("{\"agent_retry_max\": 1}"))["agent_retry_max"],
+            1
+        );
     }
 
     #[test]
