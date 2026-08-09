@@ -160,6 +160,7 @@ mod tests {
             created_at: None,
             children: Vec::new(),
             is_composite: false,
+            warnings: Vec::new(),
         }
     }
 

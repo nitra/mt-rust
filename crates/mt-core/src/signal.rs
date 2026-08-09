@@ -43,6 +43,9 @@ fn node_dir(tasks_dir: &str, node_path: &str) -> Result<PathBuf, String> {
     if !dir.join("task.md").is_file() {
         return Err(format!("node not found: {node_path}"));
     }
+    // Fail closed (graph.md): сигнал за контрактом чужої схеми не публікуємо —
+    // спільна точка входу done/audit/failed/run_check.
+    crate::frontmatter::check_schema_version_of_file(&dir.join("task.md"))?;
     Ok(dir)
 }
 

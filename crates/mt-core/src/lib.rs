@@ -56,6 +56,12 @@ pub struct TaskNode {
     pub created_at: Option<String>,
     pub children: Vec<TaskNode>,
     pub is_composite: bool,
+    /// Порушення контракту, що не міняють стан вузла, але видимі в `mt status`
+    /// (graph.md: порушення схеми, далі — `orphan-node`,
+    /// `blocked-invalid-dep`). Порожній вектор не серіалізується — наявні
+    /// JSON-споживачі не бачать нового поля.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -659,7 +665,34 @@ fn scan_dir(
         created_at: fm.created_at,
         children,
         is_composite,
+        warnings: schema_warnings(dir),
     })
+}
+
+/// Порушення контракту `schema_version` у файлах вузла (graph.md). Скан не
+/// падає на них: він має показувати граф цілком, зокрема зламані вузли — а
+/// відмова виконувати їх стоїть на гейтах `preflight`/`signal`/`spawn`.
+fn schema_warnings(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for name in ["task.md", "a.md", "h.md"] {
+        let path = dir.join(name);
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if !content.trim_start().starts_with("---") {
+            out.push(format!("{name}: немає YAML-frontmatter"));
+            continue;
+        }
+        let fm = frontmatter::parse_front_matter(&content);
+        match frontmatter::schema_version_of(&fm) {
+            Err(e) => out.push(format!("{name}: {e}")),
+            Ok(None) => out.push(format!(
+                "{name}: немає schema_version — обовʼязкове перше поле (graph.md)"
+            )),
+            Ok(Some(_)) => {}
+        }
+    }
+    out
 }
 
 // ── Workspace discovery ───────────────────────────────────────────────────────
@@ -1237,6 +1270,57 @@ mod tests {
             ("run_002.md", ""),
         ];
         assert_eq!(state_of("task", &files, &[], None), TaskState::Waiting); // streak 2 < 3
+    }
+
+    // ── warnings схеми у скані ──
+
+    /// Як [`state_of`], але повертає попередження вузла.
+    fn warnings_of(node: &str, files: &[(&str, &str)]) -> Vec<String> {
+        let root = tempdir().unwrap();
+        let tasks_root = root.path().join("mt");
+        let node_dir = tasks_root.join(node);
+        fs::create_dir_all(&node_dir).unwrap();
+        for (name, content) in files {
+            fs::write(node_dir.join(name), content).unwrap();
+        }
+        let nodes = scan_tasks(tasks_root.to_string_lossy().into_owned(), vec![]).unwrap();
+        find_node(&nodes, node)
+            .expect("node not found")
+            .warnings
+            .clone()
+    }
+
+    #[test]
+    fn scan_is_silent_on_well_formed_node() {
+        let files = [
+            ("task.md", "---\nschema_version: 1\n---\n\n## Task\n\nx\n"),
+            ("a.md", "---\nschema_version: 1\nmodel_tier: AVG\n---\n"),
+        ];
+        assert!(warnings_of("task", &files).is_empty());
+    }
+
+    #[test]
+    fn scan_warns_on_unknown_and_missing_schema() {
+        let files = [
+            ("task.md", "---\nschema_version: 5\n---\n\n## Task\n\nx\n"),
+            ("a.md", "---\nmodel_tier: AVG\n---\n"),
+        ];
+        let w = warnings_of("task", &files);
+        assert_eq!(w.len(), 2, "got: {w:?}");
+        assert!(w[0].starts_with("task.md:") && w[0].contains('5'), "got: {w:?}");
+        assert!(w[1].starts_with("a.md:") && w[1].contains("schema_version"), "got: {w:?}");
+    }
+
+    #[test]
+    fn scan_warns_but_does_not_change_state() {
+        // Скан має показувати зламаний вузол, а не ховати його: стан
+        // лишається звичайним, відмова виконувати стоїть на гейтах.
+        let files = [
+            ("task.md", "---\nschema_version: 5\n---\n\n## Task\n\nx\n"),
+            ("a.md", "---\nschema_version: 1\n---\n"),
+        ];
+        assert_eq!(state_of("task", &files, &[], None), TaskState::Waiting);
+        assert_eq!(warnings_of("task", &files).len(), 1);
     }
 
     // ── failed ──
