@@ -30,7 +30,7 @@
 | --- | --- | --- | --- |
 | Сканування графа, `deps/`, denylist | РЕАЛІЗОВАНО | `lib.rs` `scan_tasks`/`scan_dir` | — |
 | Derived-стани вузла | ЧАСТКОВО | `lib.rs` `detect_state` | `stalled` не виводиться (немає інтеграції з remote claim refs); `blocked-invalid-dep` як warning |
-| `failed_streak` за категорією `result` | РЕАЛІЗОВАНО | `lib.rs` `failed_streak`/`is_execution_failure` | — (межа рахунку — останній `fact_NNN`; спека каже «останній *прийнятий* fact» — відкрите питання нижче) |
+| `failed_streak`: категорія `result` + межа «прийнятий fact» | РЕАЛІЗОВАНО | `lib.rs` `failed_streak`/`is_execution_failure`/`accepted_fact_nnn` | — |
 | Файловий контракт `a.md`/`h.md` | ЧАСТКОВО | `lib.rs` `write_executor_flag` | Пишуться markdown-секціями, спека вимагає YAML-фронтматер; немає `secrets`, `interactive`, `assignee`, `notify`, `parent` — **конфлікт спека↔код, потребує рішення** |
 | Артефакти version chain (читання) | РЕАЛІЗОВАНО | `artifacts.rs` | — |
 | `schema_version` fail-closed | ВІДСУТНЄ | — | Поле пишеться, але жоден читач не валідує версію |
@@ -114,8 +114,11 @@
 5. **M6 фаза 0 — модельний трек Дельти.** Паралельно від хвилі 2, як велить roadmap: `mandates.yaml` (включно з `kind: model` і `audacity`), `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision`, квіз-гейт, конверсія вичерпаної драбини в розвилку. Соціальних ризиків нема — механіка обкатується на моделях.
 6. **M3 / M5 / M4.** Dashboard і поверхні; retro (MVP не чекає M1–M4 — дані вже є); файловий шар i18n.
 
+## Закриті питання
+
+- **Межа `failed_streak`** (2026-08-09): рішення — спека виграє, код приведено до неї. Межа — останній *прийнятий* fact (`accepted_fact_nnn`); відхилений аудитом fact межу не рухає. Причина: інакше цикл «провал → провал → сирий fact → аудит відхилив» обнуляє лічильник вічно, і драбина ретраїв ніколи не доходить до EngineerAgent чи `unresolvable` — livelock. Тест-сторож: `rejected_fact_livelock_terminates`.
+
 ## Відкриті питання
 
-- **Межа `failed_streak`.** Спека каже «NNN > останнього *прийнятого* fact»; реалізація рахує від останнього `fact_NNN` незалежно від вердикту аудиту. Розходження проявляється лише в rework-циклі після провального аудиту. Потрібне рішення: уточнити спеку чи змінити код.
 - **Формат `a.md`/`h.md`.** Спека вимагає YAML-фронтматер, код пише markdown-секції. Один із двох має поступитись — це контракт, який читають і люди, і агенти.
 - **`mt-napi`.** За рішенням Г специфікації `2026-07-23-mt-cli-rust.md` крейт мав бути видалений, але лишається у workspace members.
