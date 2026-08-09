@@ -34,7 +34,7 @@
 | Файловий контракт `a.md`/`h.md` | ЧАСТКОВО | `lib.rs` `write_executor_flag`, `runner.rs` `read_executor_flag` | Формат — YAML-фронтматер (закрито); читаються `model_tier`, `agent_cli`, `retry_ladder`. Ще не спожиті: `secrets` (брокер), `interactive`, `assignee`, `parent` |
 | Артефакти version chain (читання) | РЕАЛІЗОВАНО | `artifacts.rs` | — |
 | `schema_version` fail-closed | РЕАЛІЗОВАНО | `frontmatter.rs` `schema_version_of`/`check_schema_version`; гейти — `runner.rs` preflight, `signal.rs` `node_dir`, `spawn.rs` `plan_review` | — (невідома версія — жорстка відмова; відсутнє поле — попередження скану, див. «Закриті питання») |
-| Гейт immutability (`task.md`/`a.md`/`h.md` проти `origin/main`) | ВІДСУТНЄ | — | Немає ні в `signal.rs`, ні в `runner.rs` |
+| Гейт immutability (`task.md`/`a.md`/`h.md` проти `origin/main`) | РЕАЛІЗОВАНО | `signal.rs` `check_contract_unchanged` (у `signal_success`) | — (стоїть на `done`/`audit`; `failed` свідомо не гейтиться) |
 | Claims: CAS, lease, grace, takeover | РЕАЛІЗОВАНО | `claims.rs` | `fetch_remote_claims` існує, але не викликається з продакшн-коду |
 | Fenced publish | РЕАЛІЗОВАНО | `publish.rs` | Батчинг кількох результатів; `result: merge-conflict` не матеріалізується у `run_NNN.md` |
 | Run-wrapper, watchdog | РЕАЛІЗОВАНО | `runner.rs` | — |
@@ -115,6 +115,8 @@
 6. **M3 / M5 / M4.** Dashboard і поверхні; retro (MVP не чекає M1–M4 — дані вже є); файловий шар i18n.
 
 ## Закриті питання
+
+- **Обсяг гейта immutability** (2026-08-09): спека називає `mt done`/`mt audit` — `failed` свідомо **не** гейтиться. Причина: сенс гейта в тому, що виконавець не може переписати власний контракт (послабити `## Done when`, викинути рядок `## Check`, підняти собі `model_tier`) і на цьому **оголосити успіх**; провал контракту не привласнює, а блокування `failed` лише сховало б діагностику ретраю. Гейт fail-open там, де порівнювати нема з чим (немає репо, немає `origin/main`, файлу ще немає в базі) — це стан «до worktree», у якому спека дозволяє вільні правки.
 
 - **Строгість `schema_version`** (2026-08-09): спека каже і «перше поле всіх файлів із фронтматером», і «невідома версія → fail closed». Реалізовано двома рівнями, бо це дві різні вимоги: **невідома версія** (число не наше або взагалі не число) — жорстка відмова на гейтах `preflight`/`signal`/`spawn`, тобто вузол не виконується й результат не публікується; **відсутнє поле** — попередження скану, не відмова. Причина: файл без поля не є файлом з майбутньої схеми, тож читати його безпечно, а вимога «перше поле» адресована запису. Усі 47 фронтматер-файлів dogfood-графа поле мають, тож попередження не шумить.
 
