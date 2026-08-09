@@ -257,9 +257,20 @@ fn run_is_failure(path: &Path) -> bool {
     }
 }
 
-// count(run із result ∈ execution-failure і NNN > останнього fact) — graph.md.
+// «Прийнятий fact» (graph.md): актуальний fact_N (max NNN) без pending-audit_N
+// або з audit-result_N: success. Відхилений аудитом fact прийнятим НЕ є, тому
+// межу не рухає — інакше цикл «провал → провал → сирий fact → аудит відхилив»
+// обнуляв би лічильник вічно, і драбина ніколи не дійшла б до engineer/unresolvable.
+fn accepted_fact_nnn(dir: &Path) -> u64 {
+    match accepted_fact_state(dir) {
+        FactState::Resolved => max_nnn(dir, "fact_", ".md"),
+        FactState::PendingAudit | FactState::None => 0,
+    }
+}
+
+// count(run із result ∈ execution-failure і NNN > останнього прийнятого fact) — graph.md.
 fn failed_streak(dir: &Path) -> u64 {
-    let since = max_nnn(dir, "fact_", ".md");
+    let since = accepted_fact_nnn(dir);
     fs::read_dir(dir)
         .ok()
         .into_iter()
@@ -1283,8 +1294,24 @@ mod tests {
         assert_eq!(state_of("task", &files, &[], None), TaskState::Waiting);
     }
     #[test]
-    fn streak_counts_only_runs_after_last_fact() {
-        // run_001 failed → fact_002 прийнято → run_003 failed: streak 1, не 2.
+    fn streak_counts_only_runs_after_accepted_fact() {
+        // fact_002 прийнято (аудит success) → run_001 не рахується, streak 1 < 2.
+        let files = [
+            ("task.md", ""),
+            ("a.md", ""),
+            ("run_001.md", "---\nresult: failed\n---\n"),
+            ("fact_002.md", ""),
+            ("pending-audit_002.md", ""),
+            ("audit-result_002.md", "---\nresult: success\n---\n"),
+            ("run_003.md", "---\nresult: failed\n---\n"),
+        ];
+        // Прийнятий fact → resolved має пріоритет над станом лічильника.
+        assert_eq!(state_of("task", &files, &[], Some(2)), TaskState::Resolved);
+    }
+    #[test]
+    fn rejected_fact_does_not_reset_streak() {
+        // fact_002 відхилено аудитом → межа 0 → рахуються run_001 і run_003:
+        // streak 2 ≥ agent_retry_max 2 → failed, драбина термінує.
         let files = [
             ("task.md", ""),
             ("a.md", ""),
@@ -1294,7 +1321,26 @@ mod tests {
             ("audit-result_002.md", "---\nresult: failed\n---\n"),
             ("run_003.md", "---\nresult: failed\n---\n"),
         ];
-        assert_eq!(state_of("task", &files, &[], Some(2)), TaskState::Waiting);
+        assert_eq!(state_of("task", &files, &[], Some(2)), TaskState::Failed);
+    }
+    #[test]
+    fn rejected_fact_livelock_terminates() {
+        // Патологія, яку закриває межа «прийнятий fact»: кожен цикл дає сирий
+        // fact, аудит його відхиляє. Раніше лічильник обнулявся вічно.
+        let files = [
+            ("task.md", ""),
+            ("a.md", ""),
+            ("run_001.md", "---\nresult: failed\n---\n"),
+            ("fact_002.md", ""),
+            ("pending-audit_002.md", ""),
+            ("audit-result_002.md", "---\nresult: failed\n---\n"),
+            ("run_003.md", "---\nresult: failed\n---\n"),
+            ("fact_004.md", ""),
+            ("pending-audit_004.md", ""),
+            ("audit-result_004.md", "---\nresult: failed\n---\n"),
+            ("run_005.md", "---\nresult: failed\n---\n"),
+        ];
+        assert_eq!(state_of("task", &files, &[], None), TaskState::Failed);
     }
 
     // ── unresolvable ──
