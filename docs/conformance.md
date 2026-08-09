@@ -31,7 +31,7 @@
 | Сканування графа, `deps/`, denylist | РЕАЛІЗОВАНО | `lib.rs` `scan_tasks`/`scan_dir` | — |
 | Derived-стани вузла | ЧАСТКОВО | `lib.rs` `detect_state` | `stalled` не виводиться (немає інтеграції з remote claim refs); `blocked-invalid-dep` як warning |
 | `failed_streak`: категорія `result` + межа «прийнятий fact» | РЕАЛІЗОВАНО | `lib.rs` `failed_streak`/`is_execution_failure`/`accepted_fact_nnn` | — |
-| Файловий контракт `a.md`/`h.md` | ЧАСТКОВО | `lib.rs` `write_executor_flag` | Пишуться markdown-секціями, спека вимагає YAML-фронтматер; немає `secrets`, `interactive`, `assignee`, `notify`, `parent` — **конфлікт спека↔код, потребує рішення** |
+| Файловий контракт `a.md`/`h.md` | ЧАСТКОВО | `lib.rs` `write_executor_flag`, `runner.rs` `read_executor_flag` | Формат — YAML-фронтматер (закрито); читаються `model_tier`, `agent_cli`, `retry_ladder`. Ще не спожиті: `secrets` (брокер), `interactive`, `assignee`, `parent` |
 | Артефакти version chain (читання) | РЕАЛІЗОВАНО | `artifacts.rs` | — |
 | `schema_version` fail-closed | ВІДСУТНЄ | — | Поле пишеться, але жоден читач не валідує версію |
 | Гейт immutability (`task.md`/`a.md`/`h.md` проти `origin/main`) | ВІДСУТНЄ | — | Немає ні в `signal.rs`, ні в `runner.rs` |
@@ -116,9 +116,9 @@
 
 ## Закриті питання
 
+- **Формат `a.md`/`h.md`** (2026-08-09): рішення — **YAML-фронтматер у markdown**, жорсткий перехід. Ні голий YAML (як пропонувала спека), ні markdown-секції (як робив код): файл має розширення `.md`, тож фронтматер узгоджений з рештою `.md`-артефактів, перевикористовує один код-шлях `parse_front_matter`, рендериться при рев'ю і лишає місце для прози в тілі. Голий YAML лишається контрактом `.yml`-файлів (`.mt-claim.yml`). Спеку уточнено (nitra/mt), 19 файлів dogfood-графа мігровано, старий формат відхиляється явною помилкою в preflight — тести `preflight_rejects_legacy_section_flag`, `preflight_rejects_flag_without_frontmatter`.
 - **Межа `failed_streak`** (2026-08-09): рішення — спека виграє, код приведено до неї. Межа — останній *прийнятий* fact (`accepted_fact_nnn`); відхилений аудитом fact межу не рухає. Причина: інакше цикл «провал → провал → сирий fact → аудит відхилив» обнуляє лічильник вічно, і драбина ретраїв ніколи не доходить до EngineerAgent чи `unresolvable` — livelock. Тест-сторож: `rejected_fact_livelock_terminates`.
 
 ## Відкриті питання
 
-- **Формат `a.md`/`h.md`.** Спека вимагає YAML-фронтматер, код пише markdown-секції. Один із двох має поступитись — це контракт, який читають і люди, і агенти.
 - **`mt-napi`.** За рішенням Г специфікації `2026-07-23-mt-cli-rust.md` крейт мав бути видалений, але лишається у workspace members.

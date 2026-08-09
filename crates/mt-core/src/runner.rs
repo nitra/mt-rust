@@ -110,32 +110,71 @@ fn fm_u64(v: &serde_json::Value, key: &str) -> Option<u64> {
     v.get(key).and_then(serde_json::Value::as_u64)
 }
 
-/// Непорожні рядки секції `## <title>` прапора `a.md` — спільний
-/// markdown-конвент прапорів виконавця («## Model tier», «## Retry ladder»,
-/// «## Agent cli»). Немає a.md/секції/рядків → None.
-fn read_flag_section(dir: &Path, title_lower: &str) -> Option<Vec<String>> {
-    let content = fs::read_to_string(dir.join("a.md")).ok()?;
-    let mut lines = content.lines();
-    lines.find(|l| l.trim().to_lowercase() == title_lower)?;
-    let values: Vec<String> = lines
-        .take_while(|l| !l.trim_start().starts_with("##"))
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .map(String::from)
-        .collect();
-    (!values.is_empty()).then_some(values)
+/// Frontmatter прапора виконавця `a.md` (graph.md §a.md). Немає файлу → None.
+///
+/// Старий markdown-секційний формат («## Model tier») відхиляється **явно**:
+/// мовчазне читання як порожнього frontmatter підмінило б `model_tier` і
+/// `agent_cli` дефолтами — вузол тихо виконався б не тим виконавцем.
+pub(crate) fn read_executor_flag(dir: &Path) -> Result<Option<serde_json::Value>, String> {
+    let path = dir.join("a.md");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return Ok(None);
+    };
+    if !content.trim_start().starts_with("---") {
+        let hint = if content.contains("## ") {
+            "markdown-секційний формат («## Model tier») більше не підтримується"
+        } else {
+            "файл без YAML-frontmatter"
+        };
+        return Err(format!(
+            "{}: {hint} — очікується `---`-frontmatter із ключами \
+             model_tier/skills/agent_cli (graph.md §a.md)",
+            path.display()
+        ));
+    }
+    Ok(Some(crate::frontmatter::parse_front_matter(&content)))
 }
 
-/// Парсить рядки секції «## Retry ladder» у драбину (буліт/рядок на щабель).
-/// Щабель "alternative-approach" завжди несе `model_tier_delta: 1` (graph.md).
-fn parse_retry_ladder(lines: &[String]) -> Option<Vec<LadderStep>> {
-    let steps: Vec<LadderStep> = lines
-        .iter()
-        .map(|l| l.trim_start_matches(['-', '*']).trim().to_lowercase())
+fn flag_str(flag: Option<&serde_json::Value>, key: &str) -> Option<String> {
+    flag?
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|strategy| LadderStep {
-            model_tier_delta: usize::from(strategy == "alternative-approach"),
-            strategy,
+        .map(String::from)
+}
+
+/// `retry_ladder` зі спеки — список щаблів: рядок (`- diagnose-first`) або
+/// мапа (`- {strategy: …, model_tier_delta: …}`). Щабель
+/// "alternative-approach" несе `model_tier_delta: 1` за замовчуванням (graph.md).
+fn parse_retry_ladder(value: &serde_json::Value) -> Option<Vec<LadderStep>> {
+    let steps: Vec<LadderStep> = value
+        .as_array()?
+        .iter()
+        .filter_map(|item| {
+            let strategy = match item {
+                serde_json::Value::String(s) => s.trim().to_lowercase(),
+                serde_json::Value::Object(_) => item
+                    .get("strategy")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("base")
+                    .trim()
+                    .to_lowercase(),
+                _ => return None,
+            };
+            if strategy.is_empty() {
+                return None;
+            }
+            let delta = item
+                .get("model_tier_delta")
+                .and_then(serde_json::Value::as_u64)
+                .map_or(usize::from(strategy == "alternative-approach"), |d| {
+                    d as usize
+                });
+            Some(LadderStep {
+                model_tier_delta: delta,
+                strategy,
+            })
         })
         .collect();
     (!steps.is_empty()).then_some(steps)
@@ -367,7 +406,8 @@ pub fn preflight_env(
 
     // Істина model_tier — прапор a.md; fallback: executor.model_tier у
     // frontmatter (старі вузли) → default_model_tier із .mt.json → AVG.
-    let tier_flag = read_flag_section(&dir, "## model tier").map(|v| v[0].clone());
+    let flag = read_executor_flag(&dir)?;
+    let tier_flag = flag_str(flag.as_ref(), "model_tier");
     let executor_tier = task_fm
         .get("executor")
         .and_then(|e| e.get("model_tier"))
@@ -384,15 +424,16 @@ pub fn preflight_env(
             .unwrap_or_else(|| "AVG".to_string()),
     );
 
-    let ladder = read_flag_section(&dir, "## retry ladder")
-        .and_then(|lines| parse_retry_ladder(&lines))
+    let ladder = flag
+        .as_ref()
+        .and_then(|f| f.get("retry_ladder"))
+        .and_then(parse_retry_ladder)
         .unwrap_or_else(default_retry_ladder);
     let step = resolve_retry_step(attempt, &ladder);
     let model_tier = bump_model_tier(&base_tier, step.model_tier_delta);
     let retry_strategy = step.strategy.clone();
 
-    let agent_cli = read_flag_section(&dir, "## agent cli")
-        .map(|v| v[0].clone())
+    let agent_cli = flag_str(flag.as_ref(), "agent_cli")
         .unwrap_or_else(|| cli_env.agent_cli.clone())
         .to_lowercase();
     // Fail-fast до claim/worktree: невідомий CLI — помилка конфігурації.
@@ -840,13 +881,15 @@ mod tests {
 
     const TASK: &str = "---\nschema_version: 1\ncreated_at: 2026-06-06T10:00:00Z\nbudget_sec: 5\nbudget_hard_sec: 2\nprogress_timeout_sec: 60\n---\n\n## Task\n\nx\n";
 
+    const FLAG: &str = "---\nschema_version: 1\nmodel_tier: AVG\n---\n";
+
     /// Пише task.md/a.md на диск, без git — для тестів `preflight()`
     /// (суто файлова логіка, git-репо не потрібне).
     fn node_files_only(tmp: &Path, path: &str) {
         let dir = tmp.join(path);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("task.md"), TASK).unwrap();
-        fs::write(dir.join("a.md"), "schema_version: 1\n").unwrap();
+        fs::write(dir.join("a.md"), FLAG).unwrap();
     }
 
     /// Як [`node_files_only`], але комітить і пушить у `origin/main` —
@@ -891,7 +934,7 @@ mod tests {
         node_files_only(&root, "solo");
         fs::write(
             root.join("solo/a.md"),
-            "## Model tier\n\nAVG\n\n## Agent cli\n\ncursor\n",
+            "---\nschema_version: 1\nmodel_tier: AVG\nagent_cli: cursor\nskills: [bash]\n---\n",
         )
         .unwrap();
         let r = root.to_string_lossy().into_owned();
@@ -918,7 +961,7 @@ mod tests {
         node_files_only(&root, "solo");
         fs::write(
             root.join("solo/a.md"),
-            "## Model tier\n\nAVG\n\n## Retry ladder\n\n- base\n- diagnose-first\n",
+            "---\nschema_version: 1\nmodel_tier: AVG\nretry_ladder:\n  - {}\n  - strategy: diagnose-first\n---\n",
         )
         .unwrap();
         fs::write(root.join("solo/run_001.md"), "---\nresult: failed\n---\n").unwrap();
@@ -930,6 +973,37 @@ mod tests {
         // Коротша драбина — останній щабель повторюється, без ескалації тиру.
         assert_eq!(plan.retry_strategy, "diagnose-first");
         assert_eq!(plan.model_tier, "AVG");
+    }
+
+    #[test]
+    fn preflight_rejects_legacy_section_flag() {
+        // Жорсткий перехід: старий a.md не читається як порожній (що підмінило
+        // б model_tier/agent_cli дефолтами), а валить preflight до claim.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mt");
+        node_files_only(&root, "solo");
+        fs::write(
+            root.join("solo/a.md"),
+            "## Model tier\n\nMAX\n\n## Agent cli\n\ncursor\n",
+        )
+        .unwrap();
+        let r = root.to_string_lossy().into_owned();
+
+        let err = preflight_env(&r, "solo", &env_default()).unwrap_err();
+        assert!(err.contains("markdown-секційний формат"), "got: {err}");
+        assert!(err.contains("graph.md"), "помилка має вказувати на спеку");
+    }
+
+    #[test]
+    fn preflight_rejects_flag_without_frontmatter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mt");
+        node_files_only(&root, "solo");
+        fs::write(root.join("solo/a.md"), "model_tier: MAX\n").unwrap();
+        let r = root.to_string_lossy().into_owned();
+
+        let err = preflight_env(&r, "solo", &env_default()).unwrap_err();
+        assert!(err.contains("без YAML-frontmatter"), "got: {err}");
     }
 
     #[test]
@@ -1123,7 +1197,7 @@ printf -- '---\nschema_version: 1\n---\n\n## Summary\n\nok\n' > "fact_${MT_RUN_N
             "---\nschema_version: 1\nbudget_sec: 5\nbudget_hard_sec: 2\n---\n\n## Task\n\nx\n\n## Check\n\nfalse\n",
         )
         .unwrap();
-        fs::write(dir.join("a.md"), "schema_version: 1\n").unwrap();
+        fs::write(dir.join("a.md"), FLAG).unwrap();
         crate::test_support::commit_all(repo.work.path(), "add gated");
         crate::test_support::push_head(repo.work.path(), "refs/heads/main");
 
