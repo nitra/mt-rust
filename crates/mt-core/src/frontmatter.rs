@@ -117,9 +117,12 @@ fn parse_yaml_block(block: &str) -> Map<String, Value> {
             continue;
         }
 
-        if next_line.trim_start().starts_with("- ") {
-            // Список.
+        if next_line.trim_start().starts_with("- ") || next_line.trim_start() == "-" {
+            // Список. Елемент — скаляр (`- bash`), inline-мапа (`- {}`) або
+            // блокова мапа (`- strategy: x` + рядки продовження глибше).
+            let item_indent = get_indent(next_line);
             let mut arr = vec![];
+            let mut item: Option<Vec<String>> = None;
             while i < lines.len() {
                 let l = lines[i];
                 if l.trim().is_empty() {
@@ -130,10 +133,19 @@ fn parse_yaml_block(block: &str) -> Map<String, Value> {
                     break;
                 }
                 let t = l.trim_start();
-                if let Some(item) = t.strip_prefix("- ") {
-                    arr.push(parse_scalar(item.trim()));
+                if get_indent(l) <= item_indent && (t == "-" || t.starts_with("- ")) {
+                    if let Some(prev) = item.take() {
+                        arr.push(finish_list_item(prev));
+                    }
+                    item = Some(vec![t.strip_prefix('-').unwrap_or(t).trim().to_string()]);
+                } else if let Some(cur) = item.as_mut() {
+                    // Рядок продовження блокової мапи цього елемента.
+                    cur.push(t.to_string());
                 }
                 i += 1;
+            }
+            if let Some(prev) = item.take() {
+                arr.push(finish_list_item(prev));
             }
             result.insert(key, Value::Array(arr));
         } else {
@@ -196,12 +208,81 @@ fn js_number(s: &str) -> Option<Value> {
 }
 
 /// Парсить скалярне значення: булеве, null, число, лапки, або рядок.
+/// Елемент списку: рядки `["strategy: x", "skills_add: [y]"]` → мапа;
+/// один рядок без `key:` → скаляр. Порожній елемент (`-` або `- {}`) → `{}`.
+fn finish_list_item(lines: Vec<String>) -> Value {
+    let first = lines.first().map(String::as_str).unwrap_or("");
+    if lines.len() == 1 {
+        if first.is_empty() {
+            return Value::Object(Map::new());
+        }
+        if !looks_like_mapping(first) {
+            return parse_scalar(first);
+        }
+    }
+    Value::Object(parse_yaml_block(&lines.join("\n")))
+}
+
+/// Чи рядок є `key: value`/`key:` — ключ до першої двокрапки без пробілів
+/// і лапок (щоб `http://x` чи `note: a: b` не ламали визначення).
+fn looks_like_mapping(s: &str) -> bool {
+    let Some(idx) = s.find(':') else {
+        return false;
+    };
+    let key = &s[..idx];
+    let rest = &s[idx + 1..];
+    !key.is_empty()
+        && !key.contains(' ')
+        && !key.contains('"')
+        && !key.contains('\'')
+        && (rest.is_empty() || rest.starts_with(' '))
+}
+
+/// Inline flow-масив `[a, b]` — split по комах верхнього рівня (вкладені
+/// дужки й лапки не розрізаються).
+fn parse_flow_seq(inner: &str) -> Vec<Value> {
+    let mut items: Vec<Value> = vec![];
+    let (mut depth, mut quote, mut start) = (0usize, None::<char>, 0usize);
+    let bytes: Vec<(usize, char)> = inner.char_indices().collect();
+    for (pos, ch) in bytes {
+        match (quote, ch) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(ch),
+            (None, '[' | '{') => depth += 1,
+            (None, ']' | '}') => depth = depth.saturating_sub(1),
+            (None, ',') if depth == 0 => {
+                items.push(parse_scalar(inner[start..pos].trim()));
+                start = pos + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = inner[start..].trim();
+    if !tail.is_empty() {
+        items.push(parse_scalar(tail));
+    }
+    items
+}
+
 fn parse_scalar(s: &str) -> Value {
     match s {
         "true" => return Value::Bool(true),
         "false" => return Value::Bool(false),
         "null" | "~" => return Value::Null,
         _ => {}
+    }
+    // Inline flow: `[a, b]` і `{}` / `{k: v}`.
+    if let Some(inner) = s.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+        return Value::Array(parse_flow_seq(inner));
+    }
+    if let Some(inner) = s.strip_prefix('{').and_then(|r| r.strip_suffix('}')) {
+        let block: Vec<String> = parse_flow_seq(inner)
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .filter(|p| looks_like_mapping(p))
+            .collect();
+        return Value::Object(parse_yaml_block(&block.join("\n")));
     }
     if let Some(n) = js_number(s) {
         return n;
@@ -370,5 +451,81 @@ mod tests {
         let src = "schema_version: 1\ncreated_at: \"2026-06-14T00:00:00Z\"\nresult: success";
         let fm = parse_front_matter(&format!("---\n{src}\n---\n"));
         assert_eq!(serialize_yaml(&fm, 0), src);
+    }
+
+    // ── inline flow і списки мап (форма a.md зі спеки graph.md) ──
+
+    #[test]
+    fn inline_flow_sequence() {
+        let v = parse_yaml("skills: [bash, write-files]\nsecrets: [STRIPE_KEY]");
+        assert_eq!(v["skills"], json!(["bash", "write-files"]));
+        assert_eq!(v["secrets"], json!(["STRIPE_KEY"]));
+    }
+
+    #[test]
+    fn inline_flow_sequence_quoted_and_empty() {
+        let v = parse_yaml("a: []\nb: ['x, y', z]");
+        assert_eq!(v["a"], json!([]));
+        // Кома всередині лапок не розрізає елемент.
+        assert_eq!(v["b"], json!(["x, y", "z"]));
+    }
+
+    #[test]
+    fn block_sequence_of_scalars_unchanged() {
+        let v = parse_yaml("skills:\n  - bash\n  - write-files");
+        assert_eq!(v["skills"], json!(["bash", "write-files"]));
+    }
+
+    #[test]
+    fn sequence_of_mappings() {
+        let v = parse_yaml("retry_ladder:\n  - {}\n  - strategy: diagnose-first\n");
+        assert_eq!(v["retry_ladder"], json!([{}, {"strategy": "diagnose-first"}]));
+    }
+
+    #[test]
+    fn sequence_of_multiline_mappings() {
+        let src = "retry_ladder:\n  - strategy: alternative-approach\n    model_tier_delta: 1\n  - strategy: diagnose-first\n";
+        let v = parse_yaml(src);
+        assert_eq!(
+            v["retry_ladder"],
+            json!([
+                {"strategy": "alternative-approach", "model_tier_delta": 1},
+                {"strategy": "diagnose-first"}
+            ])
+        );
+    }
+
+    #[test]
+    fn colon_in_value_is_not_a_mapping_key() {
+        // «- note: a: b» — ключ note, решта значення; «- http://x» — скаляр.
+        let v = parse_yaml("items:\n  - http://x\n  - note: a: b\n");
+        assert_eq!(v["items"][0], json!("http://x"));
+        assert_eq!(v["items"][1], json!({"note": "a: b"}));
+    }
+
+    #[test]
+    fn a_md_frontmatter_full_shape() {
+        let src = concat!(
+            "---\n",
+            "schema_version: 1\n",
+            "created_at: 2026-08-09T10:00:00Z\n",
+            "model_tier: AVG\n",
+            "agent_cli: codex\n",
+            "skills: [bash, write-files]\n",
+            "secrets: [STRIPE_KEY]\n",
+            "retry_ladder:\n",
+            "  - {}\n",
+            "  - strategy: diagnose-first\n",
+            "interactive: false\n",
+            "---\n\nПрозовий коментар до вибору виконавця.\n"
+        );
+        let fm = parse_front_matter(src);
+        assert_eq!(fm["schema_version"], json!(1));
+        assert_eq!(fm["model_tier"], json!("AVG"));
+        assert_eq!(fm["agent_cli"], json!("codex"));
+        assert_eq!(fm["skills"], json!(["bash", "write-files"]));
+        assert_eq!(fm["interactive"], json!(false));
+        assert_eq!(fm["retry_ladder"][1]["strategy"], json!("diagnose-first"));
+        assert_eq!(get_body(src), "Прозовий коментар до вибору виконавця.\n");
     }
 }

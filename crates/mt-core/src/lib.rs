@@ -64,6 +64,9 @@ pub struct WorkspaceInfo {
     pub path: String,
 }
 
+/// `schema_version` прапорів виконавця (graph.md §a.md/§h.md).
+pub const FLAG_SCHEMA_VERSION: u64 = 1;
+
 /// Виконавець вузла. Істина — прапор-файл `a.md`/`h.md`, не поле frontmatter.
 /// Пише прапор виконавця (`a.md` або `h.md`) і видаляє протилежний —
 /// інваріант «рівно один прапор» (§4.3). Повертає ім'я записаного файлу.
@@ -74,25 +77,33 @@ pub fn write_executor_flag(
     skills: &[String],
     qualification: Option<&str>,
 ) -> Result<&'static str, String> {
+    let created_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     match mode {
         Mode::Agent => {
-            let skill_lines = skills
-                .iter()
-                .map(|s| format!("- {s}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let content = format!("## Model tier\n\n{model_tier}\n\n## Skills\n\n{skill_lines}\n");
-            write_atomic(&task_dir.join("a.md"), &content)?;
+            let fm = serde_json::json!({
+                "schema_version": FLAG_SCHEMA_VERSION,
+                "created_at": created_at,
+                "model_tier": model_tier,
+                "skills": skills,
+                "interactive": false,
+            });
+            write_atomic(&task_dir.join("a.md"), &frontmatter::build_markdown(&fm, ""))?;
             let _ = fs::remove_file(task_dir.join("h.md"));
             Ok("a.md")
         }
         Mode::Human => {
-            let content = match qualification {
-                Some(q) => format!("## Qualification\n\n{q}\n"),
-                None => "## Qualification\n\n<!-- Опишіть необхідну кваліфікацію виконавця -->\n"
-                    .to_string(),
+            let fm = serde_json::json!({
+                "schema_version": FLAG_SCHEMA_VERSION,
+                "created_at": created_at,
+                "notify": true,
+                "qualification": qualification.unwrap_or(""),
+            });
+            let body = if qualification.is_some() {
+                ""
+            } else {
+                "<!-- Опишіть необхідну кваліфікацію виконавця у полі qualification -->\n"
             };
-            write_atomic(&task_dir.join("h.md"), &content)?;
+            write_atomic(&task_dir.join("h.md"), &frontmatter::build_markdown(&fm, body))?;
             let _ = fs::remove_file(task_dir.join("a.md"));
             Ok("h.md")
         }
@@ -1701,10 +1712,33 @@ mod tests {
         let outcome = create_task(mt, "agentic".to_string(), opts).unwrap();
         assert!(matches!(&outcome, CreateOutcome::Created { flag, .. } if flag == "a.md"));
         let a = fs::read_to_string(root.path().join("mt/agentic/a.md")).unwrap();
-        assert!(a.contains("## Model tier\n\nMAX\n"), "got: {a}");
-        assert!(a.contains("## Skills"));
-        assert!(a.contains("- bash"));
+        assert!(a.starts_with("---\n"), "a.md має бути frontmatter: {a}");
+        let fm = frontmatter::parse_front_matter(&a);
+        assert_eq!(fm["schema_version"], serde_json::json!(1));
+        assert_eq!(fm["model_tier"], serde_json::json!("MAX"));
+        assert_eq!(fm["skills"], serde_json::json!(["bash", "write-files"]));
+        assert_eq!(fm["interactive"], serde_json::json!(false));
+        assert!(fm["created_at"].is_string());
         assert!(!root.path().join("mt/agentic/h.md").exists());
+    }
+
+    #[test]
+    fn create_human_writes_h_md_frontmatter() {
+        let (root, mt) = create_repo(None);
+        let opts = CreateOpts {
+            mode: Some(Mode::Human),
+            qualification: Some("senior backend engineer".to_string()),
+            ..Default::default()
+        };
+        create_task(mt, "manual".to_string(), opts).unwrap();
+        let h = fs::read_to_string(root.path().join("mt/manual/h.md")).unwrap();
+        let fm = frontmatter::parse_front_matter(&h);
+        assert_eq!(fm["schema_version"], serde_json::json!(1));
+        assert_eq!(
+            fm["qualification"],
+            serde_json::json!("senior backend engineer")
+        );
+        assert_eq!(fm["notify"], serde_json::json!(true));
     }
 
     #[test]
