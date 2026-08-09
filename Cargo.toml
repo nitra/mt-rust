@@ -6,6 +6,7 @@ members = [
   "crates/agent-server",
   "crates/mt",
   "crates/mt-core",
+  "crates/mt-mandates",
 ]
 resolver = "2"
 
@@ -33,3 +34,5 @@ futures = "0.3"
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
 gix = { version = "0.86", features = ["blocking-network-client"] }
+serde_norway = "0.9"
+globset = "0.4"
