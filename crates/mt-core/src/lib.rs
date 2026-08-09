@@ -235,8 +235,50 @@ fn max_nnn(dir: &Path, prefix: &str, suffix: &str) -> u64 {
         .unwrap_or(0)
 }
 
+// Категорії `result` у run_NNN.md (graph.md, таблиця «Категорія | Values»):
+// execution-failure інкрементує failed_streak; lifecycle-результати
+// (decomposed | claim-lost | handoff) лічильник не змінюють.
+fn is_execution_failure(result: &str) -> bool {
+    matches!(
+        result,
+        "failed" | "progress-timeout" | "budget-exceeded" | "merge-conflict"
+    )
+}
+
+// Run без розпізнаного result рахується як failure: недоведений провал
+// коштує зайвого ретраю, недорахований — нескінченної драбини.
+fn run_is_failure(path: &Path) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return true;
+    };
+    match frontmatter::parse_front_matter(&content).get("result") {
+        Some(v) => v.as_str().is_none_or(|s| is_execution_failure(s.trim())),
+        None => true,
+    }
+}
+
+// count(run із result ∈ execution-failure і NNN > останнього fact) — graph.md.
 fn failed_streak(dir: &Path) -> u64 {
-    max_nnn(dir, "run_", ".md").saturating_sub(max_nnn(dir, "fact_", ".md"))
+    let since = max_nnn(dir, "fact_", ".md");
+    fs::read_dir(dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .filter(|e| {
+            let name = e.file_name();
+            let s = name.to_string_lossy();
+            let Some(nnn) = s
+                .strip_prefix("run_")
+                .and_then(|rest| rest.strip_suffix(".md"))
+                .and_then(|n| n.parse::<u64>().ok())
+            else {
+                return false;
+            };
+            nnn > since && run_is_failure(&e.path())
+        })
+        .count() as u64
 }
 
 // ── State detection ───────────────────────────────────────────────────────────
@@ -1203,6 +1245,56 @@ mod tests {
             ("run_002.md", ""),
         ];
         assert_eq!(state_of("task", &files, &[], None), TaskState::Resolved);
+    }
+    #[test]
+    fn lifecycle_results_do_not_count_toward_streak() {
+        // graph.md: decomposed | claim-lost | handoff — категорія lifecycle,
+        // failed_streak не змінюють. Три міграції сесії ≠ failed.
+        let files = [
+            ("task.md", ""),
+            ("a.md", ""),
+            ("run_001.md", "---\nresult: handoff\n---\n"),
+            ("run_002.md", "---\nresult: claim-lost\n---\n"),
+            ("run_003.md", "---\nresult: decomposed\n---\n"),
+        ];
+        assert_eq!(state_of("task", &files, &[], None), TaskState::Waiting);
+    }
+    #[test]
+    fn execution_failures_count_toward_streak() {
+        let files = [
+            ("task.md", ""),
+            ("a.md", ""),
+            ("run_001.md", "---\nresult: failed\n---\n"),
+            ("run_002.md", "---\nresult: progress-timeout\n---\n"),
+            ("run_003.md", "---\nresult: budget-exceeded\n---\n"),
+        ];
+        assert_eq!(state_of("task", &files, &[], None), TaskState::Failed);
+    }
+    #[test]
+    fn handoff_between_failures_does_not_inflate_streak() {
+        // Дві реальні невдачі + handoff посередині: streak 2 < 3 → ще waiting.
+        let files = [
+            ("task.md", ""),
+            ("a.md", ""),
+            ("run_001.md", "---\nresult: failed\n---\n"),
+            ("run_002.md", "---\nresult: handoff\n---\n"),
+            ("run_003.md", "---\nresult: merge-conflict\n---\n"),
+        ];
+        assert_eq!(state_of("task", &files, &[], None), TaskState::Waiting);
+    }
+    #[test]
+    fn streak_counts_only_runs_after_last_fact() {
+        // run_001 failed → fact_002 прийнято → run_003 failed: streak 1, не 2.
+        let files = [
+            ("task.md", ""),
+            ("a.md", ""),
+            ("run_001.md", "---\nresult: failed\n---\n"),
+            ("fact_002.md", ""),
+            ("pending-audit_002.md", ""),
+            ("audit-result_002.md", "---\nresult: failed\n---\n"),
+            ("run_003.md", "---\nresult: failed\n---\n"),
+        ];
+        assert_eq!(state_of("task", &files, &[], Some(2)), TaskState::Waiting);
     }
 
     // ── unresolvable ──
