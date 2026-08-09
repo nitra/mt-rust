@@ -29,11 +29,11 @@
 | Підсистема | Вердикт | Де в коді | Чого бракує |
 | --- | --- | --- | --- |
 | Сканування графа, `deps/`, denylist | РЕАЛІЗОВАНО | `lib.rs` `scan_tasks`/`scan_dir` | — |
-| Derived-стани вузла | ЧАСТКОВО | `lib.rs` `detect_state` | `stalled` не виводиться (немає інтеграції з remote claim refs); `blocked-invalid-dep` як warning |
+| Derived-стани вузла | ЧАСТКОВО | `lib.rs` `detect_state` | `stalled` не виводиться (немає інтеграції з remote claim refs); `blocked-invalid-dep` як warning (поверхня `TaskNode.warnings` уже є) |
 | `failed_streak`: категорія `result` + межа «прийнятий fact» | РЕАЛІЗОВАНО | `lib.rs` `failed_streak`/`is_execution_failure`/`accepted_fact_nnn` | — |
 | Файловий контракт `a.md`/`h.md` | ЧАСТКОВО | `lib.rs` `write_executor_flag`, `runner.rs` `read_executor_flag` | Формат — YAML-фронтматер (закрито); читаються `model_tier`, `agent_cli`, `retry_ladder`. Ще не спожиті: `secrets` (брокер), `interactive`, `assignee`, `parent` |
 | Артефакти version chain (читання) | РЕАЛІЗОВАНО | `artifacts.rs` | — |
-| `schema_version` fail-closed | ВІДСУТНЄ | — | Поле пишеться, але жоден читач не валідує версію |
+| `schema_version` fail-closed | РЕАЛІЗОВАНО | `frontmatter.rs` `schema_version_of`/`check_schema_version`; гейти — `runner.rs` preflight, `signal.rs` `node_dir`, `spawn.rs` `plan_review` | — (невідома версія — жорстка відмова; відсутнє поле — попередження скану, див. «Закриті питання») |
 | Гейт immutability (`task.md`/`a.md`/`h.md` проти `origin/main`) | ВІДСУТНЄ | — | Немає ні в `signal.rs`, ні в `runner.rs` |
 | Claims: CAS, lease, grace, takeover | РЕАЛІЗОВАНО | `claims.rs` | `fetch_remote_claims` існує, але не викликається з продакшн-коду |
 | Fenced publish | РЕАЛІЗОВАНО | `publish.rs` | Батчинг кількох результатів; `result: merge-conflict` не матеріалізується у `run_NNN.md` |
@@ -115,6 +115,8 @@
 6. **M3 / M5 / M4.** Dashboard і поверхні; retro (MVP не чекає M1–M4 — дані вже є); файловий шар i18n.
 
 ## Закриті питання
+
+- **Строгість `schema_version`** (2026-08-09): спека каже і «перше поле всіх файлів із фронтматером», і «невідома версія → fail closed». Реалізовано двома рівнями, бо це дві різні вимоги: **невідома версія** (число не наше або взагалі не число) — жорстка відмова на гейтах `preflight`/`signal`/`spawn`, тобто вузол не виконується й результат не публікується; **відсутнє поле** — попередження скану, не відмова. Причина: файл без поля не є файлом з майбутньої схеми, тож читати його безпечно, а вимога «перше поле» адресована запису. Усі 47 фронтматер-файлів dogfood-графа поле мають, тож попередження не шумить.
 
 - **`mt-napi`** (2026-08-09): рішення — видалити з репо. Питання було поставлене неточно («лишився всупереч рішенню Г»): рішення Г від 2026-07-23 скасувала специфікація від 2026-07-27, яка свідомо повернула крейт заради `@7n/rules`. Але 2026-07-30 `@7n/rules` зробив власний `rules-core`/`rules-napi` із власним `worktree.rs` — і крейт лишився **без жодного споживача**, тягнучи CI-матрицю zigbuild і два платформні npm-підпакети. Видалено `crates/mt-napi`, `npm/mt-napi`, `packages/`, `npm-publish.yml`; опубліковані версії в npm не знімались (unpublish зламав би невідомих зовнішніх споживачів).
 

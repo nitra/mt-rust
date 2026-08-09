@@ -250,6 +250,8 @@ pub fn plan_review(tasks_dir: &str, node_path: &str) -> Result<PlanReview, Strin
     let (nnn, plan_file, content) =
         latest_plan(&dir).ok_or_else(|| format!("no plan_NNN.md in {node_path}"))?;
     let fm = crate::frontmatter::parse_front_matter(&content);
+    // Fail closed (graph.md): дітей із плану чужої схеми не матеріалізуємо.
+    crate::frontmatter::check_schema_version(&fm, &dir.join(&plan_file))?;
     let decision = fm
         .get("decision")
         .and_then(serde_json::Value::as_str)

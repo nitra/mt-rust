@@ -132,7 +132,9 @@ pub(crate) fn read_executor_flag(dir: &Path) -> Result<Option<serde_json::Value>
             path.display()
         ));
     }
-    Ok(Some(crate::frontmatter::parse_front_matter(&content)))
+    let fm = crate::frontmatter::parse_front_matter(&content);
+    crate::frontmatter::check_schema_version(&fm, &path)?;
+    Ok(Some(fm))
 }
 
 fn flag_str(flag: Option<&serde_json::Value>, key: &str) -> Option<String> {
@@ -352,6 +354,8 @@ pub fn preflight_env(
     if !dir.join("a.md").is_file() {
         return Err("вузол без a.md — runner запускає лише агентські вузли".to_string());
     }
+    // Fail closed до claim: файл із чужою схемою не виконуємо (graph.md).
+    crate::frontmatter::check_schema_version_of_file(&dir.join("task.md"))?;
     if crate::has_running_marker(&dir) {
         return Err("вузол уже running (є running_* маркер)".to_string());
     }
@@ -973,6 +977,39 @@ mod tests {
         // Коротша драбина — останній щабель повторюється, без ескалації тиру.
         assert_eq!(plan.retry_strategy, "diagnose-first");
         assert_eq!(plan.model_tier, "AVG");
+    }
+
+    #[test]
+    fn preflight_fails_closed_on_unknown_task_schema() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mt");
+        node_files_only(&root, "solo");
+        fs::write(
+            root.join("solo/task.md"),
+            "---\nschema_version: 2\nbudget_sec: 5\n---\n\n## Task\n\nx\n",
+        )
+        .unwrap();
+        let r = root.to_string_lossy().into_owned();
+
+        let err = preflight_env(&r, "solo", &env_default()).unwrap_err();
+        assert!(err.contains("schema_version 2"), "got: {err}");
+        assert!(err.contains("task.md"), "помилка має називати файл");
+    }
+
+    #[test]
+    fn preflight_fails_closed_on_unknown_flag_schema() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mt");
+        node_files_only(&root, "solo");
+        fs::write(
+            root.join("solo/a.md"),
+            "---\nschema_version: 7\nmodel_tier: AVG\n---\n",
+        )
+        .unwrap();
+        let r = root.to_string_lossy().into_owned();
+
+        let err = preflight_env(&r, "solo", &env_default()).unwrap_err();
+        assert!(err.contains("schema_version 7"), "got: {err}");
     }
 
     #[test]

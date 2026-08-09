@@ -5,10 +5,52 @@
 //! `serialize_yaml` має лишатися **байт-у-байт** ідентичним JS-версії.
 //! Ключі зберігають порядок вставки (`serde_json` із `preserve_order`).
 
+use std::path::Path;
+
 use serde_json::{Map, Value};
 
 /// Спецсимволи YAML, що вимагають лапок (JS `YAML_SPECIAL_RE`).
 const YAML_SPECIAL: &[char] = &[':', '#', '[', ']', '{', '}', ',', '\n'];
+
+/// Версія схеми файлів графа, яку розуміє ця збірка (graph.md, «Інваріанти»).
+pub const SCHEMA_VERSION: u64 = 1;
+
+/// Fail-closed розбір `schema_version` (graph.md: «невідома версія → fail
+/// closed»).
+///
+/// `Err` — лише на **впізнано чужій** версії: число не наше або взагалі не
+/// число. Відсутнє поле → `Ok(None)`: нормативна вимога «перше поле всіх
+/// файлів» адресована запису, а fail-closed адресований невпізнанню версії.
+/// Файл без поля не є файлом з майбутньої схеми — його читання безпечне, а
+/// порушення контракту сигналізується попередженням скану, не відмовою.
+pub fn schema_version_of(fm: &Value) -> Result<Option<u64>, String> {
+    match fm.get("schema_version") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => match v.as_u64() {
+            Some(n) if n == SCHEMA_VERSION => Ok(Some(n)),
+            Some(n) => Err(format!(
+                "schema_version {n} не підтримується — ця збірка розуміє {SCHEMA_VERSION}"
+            )),
+            None => Err(format!("schema_version має бути цілим числом, а не {v}")),
+        },
+    }
+}
+
+/// [`schema_version_of`] з іменем файлу в помилці — для гейтів виконання.
+pub fn check_schema_version(fm: &Value, path: &Path) -> Result<(), String> {
+    schema_version_of(fm)
+        .map(|_| ())
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Читає файл і перевіряє версію схеми. Немає файлу → `Ok(())` (відсутність
+/// артефакта — не порушення схеми; це вирішує викликач).
+pub fn check_schema_version_of_file(path: &Path) -> Result<(), String> {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Ok(());
+    };
+    check_schema_version(&parse_front_matter(&content), path)
+}
 
 /// Розбиває текст на `(кінець збігу front-matter, внутрішній блок)`.
 /// Еквівалент JS `/^---\r?\n([\s\S]*?)\r?\n---/`.
@@ -451,6 +493,43 @@ mod tests {
         let src = "schema_version: 1\ncreated_at: \"2026-06-14T00:00:00Z\"\nresult: success";
         let fm = parse_front_matter(&format!("---\n{src}\n---\n"));
         assert_eq!(serialize_yaml(&fm, 0), src);
+    }
+
+    // ── schema_version fail-closed ──
+
+    #[test]
+    fn schema_version_known_ok() {
+        let fm = parse_front_matter("---\nschema_version: 1\n---\n");
+        assert_eq!(schema_version_of(&fm).unwrap(), Some(1));
+    }
+
+    #[test]
+    fn schema_version_missing_is_not_an_error() {
+        // Fail-closed адресований невпізнанню версії, а не її відсутності:
+        // файл без поля не є файлом з майбутньої схеми.
+        let fm = parse_front_matter("---\nresult: failed\n---\n");
+        assert_eq!(schema_version_of(&fm).unwrap(), None);
+    }
+
+    #[test]
+    fn schema_version_unknown_fails_closed() {
+        let fm = parse_front_matter("---\nschema_version: 2\n---\n");
+        let err = schema_version_of(&fm).unwrap_err();
+        assert!(err.contains('2'), "got: {err}");
+        assert!(err.contains('1'), "у помилці має бути підтримувана версія");
+    }
+
+    #[test]
+    fn schema_version_non_integer_fails_closed() {
+        let fm = parse_front_matter("---\nschema_version: draft\n---\n");
+        assert!(schema_version_of(&fm).unwrap_err().contains("цілим числом"));
+    }
+
+    #[test]
+    fn check_schema_version_names_the_file() {
+        let fm = parse_front_matter("---\nschema_version: 99\n---\n");
+        let err = check_schema_version(&fm, Path::new("mt/demo/task.md")).unwrap_err();
+        assert!(err.starts_with("mt/demo/task.md:"), "got: {err}");
     }
 
     // ── inline flow і списки мап (форма a.md зі спеки graph.md) ──
