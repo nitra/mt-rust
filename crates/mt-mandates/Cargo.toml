@@ -1,0 +1,23 @@
+[package]
+name = "mt-mandates"
+description = "Карта мандатів .mt/mandates.yaml, маршрутизатор ескалацій і квіз-гейт — реалізація нормативного контракту M6 фаза 0 (mandates.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "mt_mandates"
+
+[dependencies]
+agent-protocol = { path = "../agent-protocol" }
+mt-core = { path = "../mt-core" }
+serde.workspace = true
+serde_json.workspace = true
+serde_norway.workspace = true
+globset.workspace = true
+ed25519-dalek.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
