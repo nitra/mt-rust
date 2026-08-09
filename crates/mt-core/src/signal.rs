@@ -188,6 +188,61 @@ pub fn write_run_fm(
     Ok(run_file)
 }
 
+/// Файли-контракт вузла: **що** робити і **хто** робить (graph.md, «Межа
+/// immutability»). Порядок — для стабільного повідомлення про порушення.
+const CONTRACT_FILES: [&str; 3] = ["task.md", "a.md", "h.md"];
+
+/// Гейт immutability: `task.md`/`a.md`/`h.md` звіряються з `origin/main`,
+/// будь-яка розбіжність — відмова сигналу (graph.md).
+///
+/// Сенс не в гігієні файлів, а в тому, що виконавець не може переписати
+/// власний контракт — послабити `## Done when`, викинути рядок із `## Check`,
+/// підняти собі `model_tier` — і на цьому оголосити успіх. Тому гейт стоїть
+/// на `done`/`audit` і **не** стоїть на `failed`: провал контракту не
+/// привласнює, а блокування `failed` лише сховало б діагностику.
+///
+/// Fail-open там, де порівнювати нема з чим: немає git-репозиторію, немає
+/// `origin/main` (свіже дерево до першого push) або файлу ще немає в базі —
+/// це стан «до worktree», у якому спека дозволяє вільні правки.
+fn check_contract_unchanged(dir: &Path) -> Result<(), String> {
+    let Ok(repo) = crate::git::GitRepository::open(dir) else {
+        return Ok(());
+    };
+    let Ok(base) = repo.resolve_ref("refs/remotes/origin/main") else {
+        return Ok(());
+    };
+    let repo_root = repo.repo_root().map_err(|e| e.to_string())?;
+    let rel_dir = crate::claims::tasks_root_relative(&repo_root, dir)?;
+
+    for name in CONTRACT_FILES {
+        let rel = if rel_dir.is_empty() {
+            name.to_string()
+        } else {
+            format!("{rel_dir}/{name}")
+        };
+        let in_base = repo.read_blob_at_commit(&base, &rel).ok();
+        let on_disk = fs::read(dir.join(name)).ok();
+        match (in_base, on_disk) {
+            // Файлу не було в origin/main — новий артефакт, це дозволено.
+            (None, _) => {}
+            (Some(base_bytes), Some(disk_bytes)) if base_bytes == disk_bytes => {}
+            (Some(_), Some(_)) => {
+                return Err(format!(
+                    "{name} змінено відносно origin/main — контракт вузла immutable \
+                     (graph.md). Правка контракту йде окремим комітом у main, \
+                     не разом із результатом роботи"
+                ));
+            }
+            (Some(_), None) => {
+                return Err(format!(
+                    "{name} видалено, хоча є в origin/main — контракт вузла immutable (graph.md)"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Політика аудиту вузла: frontmatter `audit:` task.md (required|optional|off).
 fn audit_policy(dir: &Path) -> String {
     fs::read_to_string(dir.join("task.md"))
@@ -209,6 +264,7 @@ fn signal_success(
     extra_fm: &str,
 ) -> Result<SignalOutcome, String> {
     let dir = node_dir(tasks_dir, node_path)?;
+    check_contract_unchanged(&dir)?;
     let policy = audit_policy(&dir);
     if !with_audit && policy == "required" {
         return Err("audit: required — вузол приймає лише сигнал audit".to_string());
@@ -438,6 +494,113 @@ mod tests {
         let commands = check_commands(TASK_WITH_CHECK);
         assert_eq!(commands, ["true"]);
         assert!(check_commands("---\nschema_version: 1\n---\n\n## Task\n").is_empty());
+    }
+
+    // ── гейт immutability (graph.md, «Межа immutability») ──
+
+    const FLAG: &str = "---\nschema_version: 1\nmodel_tier: AVG\n---\n";
+
+    /// Вузол у git-репо з origin: контракт закомічено й опубліковано в main,
+    /// remote-tracking ref підтягнуто (гейт звіряється саме з ним).
+    fn repo_node(node_name: &str) -> (crate::test_support::TestRepo, String) {
+        let repo = crate::test_support::TestRepo::new();
+        let dir = repo.work.path().join("mt").join(node_name);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("task.md"), TASK_WITH_CHECK).unwrap();
+        fs::write(dir.join("a.md"), FLAG).unwrap();
+        crate::test_support::commit_all(repo.work.path(), "add node");
+        crate::test_support::push_head(repo.work.path(), "refs/heads/main");
+        crate::git::GitRepository::open(repo.work.path())
+            .unwrap()
+            .fetch_refspec("+refs/heads/main:refs/remotes/origin/main")
+            .unwrap();
+        let tasks_dir = repo.work.path().join("mt").to_string_lossy().into_owned();
+        (repo, tasks_dir)
+    }
+
+    #[test]
+    fn done_passes_when_contract_matches_origin_main() {
+        let (_repo, tasks) = repo_node("solo");
+        write_fact(&tasks, "solo", "Зроблено.", None).unwrap();
+        assert!(done(&tasks, "solo", "agent").is_ok());
+    }
+
+    #[test]
+    fn done_rejects_rewritten_task_md() {
+        // Суть гейта: агент послабив `## Check` і оголосив успіх.
+        let (repo, tasks) = repo_node("solo");
+        fs::write(
+            repo.work.path().join("mt/solo/task.md"),
+            TASK_WITH_CHECK.replace("true", "# викинуто"),
+        )
+        .unwrap();
+        write_fact(&tasks, "solo", "Зроблено.", None).unwrap();
+
+        let err = done(&tasks, "solo", "agent").unwrap_err();
+        assert!(err.contains("task.md змінено"), "got: {err}");
+        assert!(err.contains("origin/main"), "got: {err}");
+    }
+
+    #[test]
+    fn done_rejects_rewritten_flag() {
+        // Агент підняв собі model_tier — теж переписування контракту.
+        let (repo, tasks) = repo_node("solo");
+        fs::write(
+            repo.work.path().join("mt/solo/a.md"),
+            FLAG.replace("AVG", "MAX"),
+        )
+        .unwrap();
+        write_fact(&tasks, "solo", "Зроблено.", None).unwrap();
+
+        assert!(done(&tasks, "solo", "agent")
+            .unwrap_err()
+            .contains("a.md змінено"));
+    }
+
+    #[test]
+    fn done_rejects_deleted_flag() {
+        let (repo, tasks) = repo_node("solo");
+        fs::remove_file(repo.work.path().join("mt/solo/a.md")).unwrap();
+        write_fact(&tasks, "solo", "Зроблено.", None).unwrap();
+
+        assert!(done(&tasks, "solo", "agent")
+            .unwrap_err()
+            .contains("a.md видалено"));
+    }
+
+    #[test]
+    fn audit_is_gated_too() {
+        let (repo, tasks) = repo_node("solo");
+        fs::write(repo.work.path().join("mt/solo/task.md"), "---\nschema_version: 1\n---\n\n## Task\n\nпідмінено\n").unwrap();
+        write_fact(&tasks, "solo", "Зроблено.", None).unwrap();
+
+        assert!(audit(&tasks, "solo", "agent")
+            .unwrap_err()
+            .contains("task.md змінено"));
+    }
+
+    #[test]
+    fn failed_is_not_gated() {
+        // Провал контракту не привласнює; блокування `failed` лише сховало б
+        // діагностику ретраю.
+        let (repo, tasks) = repo_node("solo");
+        fs::write(
+            repo.work.path().join("mt/solo/task.md"),
+            TASK_WITH_CHECK.replace("true", "false"),
+        )
+        .unwrap();
+
+        assert!(failed(&tasks, "solo", "agent", "нічого", "все", "інакше").is_ok());
+    }
+
+    #[test]
+    fn gate_is_open_without_origin_main() {
+        // «До worktree — вільно»: без бази для порівняння гейт не спрацьовує.
+        let tmp = tempfile::tempdir().unwrap();
+        node(tmp.path(), "solo", TASK_WITH_CHECK);
+        let root = tmp.path().to_string_lossy().into_owned();
+        write_fact(&root, "solo", "Зроблено.", None).unwrap();
+        assert!(done(&root, "solo", "human").is_ok());
     }
 
     #[test]
