@@ -107,7 +107,7 @@
 
 Порядок обраний так, щоб кожна наступна хвиля спиралась на замкнений інваріант попередньої, а не на обіцянку.
 
-1. **Контрактний борг.** `schema_version` fail-closed, гейт immutability, формат `a.md`/`h.md`, повний набір ключів `.mt.json`, матеріалізація `merge-conflict`, `orphan-node` warning. Дешево, і без цього кожна наступна хвиля успадковує розходження зі спекою. `failed_streak` за категорією — **закрито**.
+1. **Контрактний борг.** Лишилось: `schema_version` fail-closed, гейт immutability, повний набір ключів `.mt.json`, матеріалізація `merge-conflict`, `orphan-node` warning. Дешево, і без цього кожна наступна хвиля успадковує розходження зі спекою. **Закрито:** `failed_streak` (категорія + межа), формат `a.md`/`h.md`, видалення `mt-napi`.
 2. **Замкнути M0 як автономний цикл.** Stage 1 + контекст агента, аудит-цикл, `unresolvable` з трьома тригерами, EngineerAgent, git-протокол для spawn/invalidate/kill. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах.
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
 4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store, auth, push-транспорт, `HandoffRequest` через relay, presence.
