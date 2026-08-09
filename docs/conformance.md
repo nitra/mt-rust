@@ -36,7 +36,7 @@
 | `schema_version` fail-closed | РЕАЛІЗОВАНО | `frontmatter.rs` `schema_version_of`/`check_schema_version`; гейти — `runner.rs` preflight, `signal.rs` `node_dir`, `spawn.rs` `plan_review` | — (невідома версія — жорстка відмова; відсутнє поле — попередження скану, див. «Закриті питання») |
 | Гейт immutability (`task.md`/`a.md`/`h.md` проти `origin/main`) | РЕАЛІЗОВАНО | `signal.rs` `check_contract_unchanged` (у `signal_success`) | — (стоїть на `done`/`audit`; `failed` свідомо не гейтиться) |
 | Claims: CAS, lease, grace, takeover | РЕАЛІЗОВАНО | `claims.rs` | `fetch_remote_claims` існує, але не викликається з продакшн-коду |
-| Fenced publish | РЕАЛІЗОВАНО | `publish.rs` | Батчинг кількох результатів; `result: merge-conflict` не матеріалізується у `run_NNN.md` |
+| Fenced publish + failure-сімейство | РЕАЛІЗОВАНО | `publish.rs` `fenced_publish`/`publish_failure_run`, `runner.rs` `terminal_conflict_reason` | Батчинг кількох результатів одним push |
 | Run-wrapper, watchdog | РЕАЛІЗОВАНО | `runner.rs` | — |
 | Retry ladder + каскад CLI | РЕАЛІЗОВАНО | `runner.rs` | Телеметрія `tokens_in/out`/`cost_usd` не збирається |
 | Stage 1 — inline-планування | ВІДСУТНЄ | `runner.rs` `build_agent_prompt` | Немає фази «спершу `plan_NNN.md`», немає `result: decomposed`, немає динамічної декомпозиції |
@@ -107,7 +107,7 @@
 
 Порядок обраний так, щоб кожна наступна хвиля спиралась на замкнений інваріант попередньої, а не на обіцянку.
 
-1. **Контрактний борг.** Лишилось: матеріалізація `result: merge-conflict`. **Закрито:** `failed_streak` (категорія + межа), формат `a.md`/`h.md`, видалення `mt-napi`, `schema_version` fail-closed, гейт immutability, дефолти `.mt.json`, `orphan-node`.
+1. **Контрактний борг — ✅ закрито.** `failed_streak` (категорія + межа), формат `a.md`/`h.md`, видалення `mt-napi`, `schema_version` fail-closed, гейт immutability, дефолти `.mt.json`, `orphan-node`, матеріалізація `result: merge-conflict`.
 2. **Замкнути M0 як автономний цикл.** Stage 1 + контекст агента, аудит-цикл, `unresolvable` з трьома тригерами, EngineerAgent, git-протокол для spawn/invalidate/kill. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах.
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
 4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store, auth, push-транспорт, `HandoffRequest` через relay, presence.

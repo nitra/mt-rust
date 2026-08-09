@@ -38,7 +38,7 @@ use crate::config::{
 use crate::frontmatter::parse_front_matter;
 use crate::git::GitRepository;
 use crate::nnn::pad_nnn;
-use crate::publish::{fenced_publish, PublishRequest};
+use crate::publish::{fenced_publish, publish_failure_run, PublishOutcome, PublishRequest};
 use crate::signal::{self, next_run_nnn, write_run_fm};
 use crate::worktree::{create_run_worktree, push_run_ref, remove_run_worktree};
 use crate::{accepted_fact_state, validate_name, FactState};
@@ -180,6 +180,23 @@ fn parse_retry_ladder(value: &serde_json::Value) -> Option<Vec<LadderStep>> {
         })
         .collect();
     (!steps.is_empty()).then_some(steps)
+}
+
+/// Чи підсумок публікації є **термінальним конфліктом**, тобто спробою, яку
+/// треба записати як `result: merge-conflict` (graph.md — execution failure,
+/// +1 до `failed_streak`).
+///
+/// Два тригери (git.md): конфлікт rebase і вичерпані publish-retry. Втрата
+/// claim (`fenced`) сюди НЕ входить — це `claim-lost`, lifecycle-категорія,
+/// яка лічильник не рухає: роботу забрав інший runner, а не вона провалилась.
+fn terminal_conflict_reason(publish: &Result<PublishOutcome, String>) -> Option<String> {
+    match publish {
+        Err(error) if error.contains("rebase conflict") => Some(error.clone()),
+        Ok(outcome) if !outcome.published && !outcome.fenced => {
+            Some("вичерпано publish retry — конкурентний publish виграв гонку".to_string())
+        }
+        _ => None,
+    }
 }
 
 /// Щабель драбини для номера спроби; коротша драбина — останній щабель
@@ -851,18 +868,52 @@ pub fn run_node_env(
         &publish_req,
         publish_retry_max,
         publish_retry_base_ms,
-    )?;
+    );
+
+    if let Some(reason) = terminal_conflict_reason(&publish) {
+        let sections = format!(
+            "\n## Completed\n\n{result}: результат зібрано у worktree\n\n## Blockers\n\n\
+             publish не вдався: {reason}\n\n## Next Attempt\n\nперечитати origin/main і повторити\n"
+        );
+        let conflict_run = write_run_fm(
+            &dir,
+            &nnn_s,
+            "wrapper",
+            "merge-conflict",
+            &sections,
+            &extra_fm,
+        )?;
+        // Робочий worktree і run ref лишаються для debug (спека,
+        // «Failure-сімейство»); публікується лише run-файл, claim
+        // звільняється тим самим atomic push.
+        let node_rel = format!("{tasks_root_rel}/{node_path}/{conflict_run}");
+        publish_failure_run(
+            &repo_root,
+            &worktrees_dir,
+            &publish_req,
+            &node_rel,
+            &fs::read_to_string(dir.join(&conflict_run)).map_err(|e| e.to_string())?,
+            publish_retry_max,
+            publish_retry_base_ms,
+        )?;
+        return Ok(RunOutcome {
+            result: "merge-conflict".to_string(),
+            run_file: conflict_run,
+            fact_file: None,
+            wall_sec,
+            agent_cli: used_agent_cli,
+            propagated: Vec::new(),
+        });
+    }
+    let publish = publish?;
 
     if !publish.published {
         // Worktree/run ref лишаються для debug (спека, «Failure-сімейство» /
-        // «Orphan worktree») — не видаляємо, наступний runner чи людина
-        // розбереться. Claim теж не чіпаємо: якщо fenced — він уже не наш.
-        return Err(if publish.fenced {
-            "claim-lost: втрачено ownership під час виконання, publish скасовано".to_string()
-        } else {
-            "publish: вичерпано retry — конкурентний publish виграв гонку, спробуйте пізніше"
-                .to_string()
-        });
+        // «Orphan worktree») — не видаляємо. Сюди доходить лише fencing:
+        // claim уже не наш, тому й не чіпаємо.
+        return Err(
+            "claim-lost: втрачено ownership під час виконання, publish скасовано".to_string(),
+        );
     }
 
     // Успішна публікація — worktree більше не потрібен.
@@ -977,6 +1028,50 @@ mod tests {
         // Коротша драбина — останній щабель повторюється, без ескалації тиру.
         assert_eq!(plan.retry_strategy, "diagnose-first");
         assert_eq!(plan.model_tier, "AVG");
+    }
+
+    // ── класифікація підсумку publish (git.md) ──
+
+    fn outcome(published: bool, fenced: bool) -> Result<PublishOutcome, String> {
+        Ok(PublishOutcome {
+            published,
+            fenced,
+            result_sha: None,
+            attempts: 1,
+        })
+    }
+
+    #[test]
+    fn rebase_conflict_is_terminal_merge_conflict() {
+        let publish = Err("rebase conflict on publish: CONFLICT (content)".to_string());
+        assert!(terminal_conflict_reason(&publish)
+            .unwrap()
+            .contains("rebase conflict"));
+    }
+
+    #[test]
+    fn exhausted_retries_are_terminal_merge_conflict() {
+        assert!(terminal_conflict_reason(&outcome(false, false))
+            .unwrap()
+            .contains("вичерпано publish retry"));
+    }
+
+    #[test]
+    fn claim_lost_is_not_merge_conflict() {
+        // fenced — це claim-lost (lifecycle), лічильник не рухає.
+        assert!(terminal_conflict_reason(&outcome(false, true)).is_none());
+    }
+
+    #[test]
+    fn successful_publish_is_not_conflict() {
+        assert!(terminal_conflict_reason(&outcome(true, false)).is_none());
+    }
+
+    #[test]
+    fn unrelated_error_is_not_merge_conflict() {
+        // Системний збій не маскується під результат спроби.
+        let publish = Err("git: permission denied".to_string());
+        assert!(terminal_conflict_reason(&publish).is_none());
     }
 
     #[test]
