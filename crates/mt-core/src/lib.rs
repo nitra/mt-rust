@@ -640,6 +640,19 @@ fn scan_dir(
         }
     }
 
+    // Легітимність дітей (graph.md, «Протокол spawn»): дитина законна лише
+    // якщо її id є в `## Children` approved-плану цього вузла. Інакше це
+    // директорія з task.md, яку ніхто не схвалював — orphan-node.
+    let approved = spawn::approved_child_ids(dir);
+    for child in &mut children {
+        if !approved.as_ref().is_some_and(|ids| ids.contains(&child.id)) {
+            child.warnings.push(
+                "orphan-node: id відсутній у `## Children` approved-плану батька (graph.md)"
+                    .to_string(),
+            );
+        }
+    }
+
     let is_composite = !children.is_empty();
     let id = dir
         .file_name()
@@ -822,11 +835,13 @@ fn scan_for_workspaces(
     }
 }
 
+/// `agent_retry_max` через штатний merge конфігу — дефолт живе в
+/// [`config::config_defaults`], а не дублюється тут хардкодом.
 fn read_agent_retry_max(project_root: &Path) -> u64 {
-    fs::read_to_string(project_root.join(".mt.json"))
-        .ok()
-        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-        .and_then(|v| v.get("agent_retry_max").and_then(|v| v.as_u64()))
+    let raw = fs::read_to_string(project_root.join(".mt.json")).ok();
+    config::merge_config(raw.as_deref())
+        .get("agent_retry_max")
+        .and_then(serde_json::Value::as_u64)
         .unwrap_or(3)
 }
 
@@ -1321,6 +1336,68 @@ mod tests {
         ];
         assert_eq!(state_of("task", &files, &[], None), TaskState::Waiting);
         assert_eq!(warnings_of("task", &files).len(), 1);
+    }
+
+    // ── orphan-node (graph.md, «Протокол spawn») ──
+
+    /// Дерево `mt/<parent>/…` з дитиною; `approved` — чи писати
+    /// plan_001 + plan-approved_001 з дитиною в `## Children`.
+    fn parent_with_child(approved_ids: Option<&[&str]>, child_id: &str) -> Vec<String> {
+        let root = tempdir().unwrap();
+        let tasks_root = root.path().join("mt");
+        let parent = tasks_root.join("parent");
+        let child = parent.join(child_id);
+        fs::create_dir_all(&child).unwrap();
+        let task = "---\nschema_version: 1\n---\n\n## Task\n\nx\n";
+        fs::write(parent.join("task.md"), task).unwrap();
+        fs::write(child.join("task.md"), task).unwrap();
+        if let Some(ids) = approved_ids {
+            let listed = ids
+                .iter()
+                .map(|id| format!("  - id: {id}\n    mode: agent\n"))
+                .collect::<String>();
+            fs::write(
+                parent.join("plan_001.md"),
+                format!("---\nschema_version: 1\n---\n\n## Children\n\n```yaml\nchildren:\n{listed}```\n"),
+            )
+            .unwrap();
+            fs::write(
+                parent.join("plan-approved_001.md"),
+                "---\nschema_version: 1\n---\n",
+            )
+            .unwrap();
+        }
+        let nodes = scan_tasks(tasks_root.to_string_lossy().into_owned(), vec![]).unwrap();
+        find_node(&nodes, &format!("parent/{child_id}"))
+            .expect("child not found")
+            .warnings
+            .clone()
+    }
+
+    #[test]
+    fn child_listed_in_approved_plan_is_legitimate() {
+        assert!(parent_with_child(Some(&["collect"]), "collect").is_empty());
+    }
+
+    #[test]
+    fn child_absent_from_approved_plan_is_orphan() {
+        let w = parent_with_child(Some(&["collect"]), "smuggled");
+        assert_eq!(w.len(), 1, "got: {w:?}");
+        assert!(w[0].starts_with("orphan-node:"), "got: {w:?}");
+    }
+
+    #[test]
+    fn child_without_any_approved_plan_is_orphan() {
+        // Без approve дітей не існує легітимно — правило легітимності spawn.
+        let w = parent_with_child(None, "collect");
+        assert_eq!(w.len(), 1, "got: {w:?}");
+        assert!(w[0].starts_with("orphan-node:"));
+    }
+
+    #[test]
+    fn root_level_node_is_never_orphan() {
+        let files = [("task.md", "---\nschema_version: 1\n---\n\n## Task\n\nx\n")];
+        assert!(warnings_of("solo", &files).is_empty());
     }
 
     // ── failed ──

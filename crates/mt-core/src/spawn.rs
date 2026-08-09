@@ -81,6 +81,37 @@ fn latest_plan(dir: &Path) -> Option<(u64, String, String)> {
 }
 
 /// Вирізає тіло секції `## Children` (до наступного `## `-заголовка).
+/// Id дітей, легітимізованих approved-планами вузла (graph.md: «вузол
+/// легітимний ↔ його id у `## Children` approved-плану батька або кореневий»).
+///
+/// Об'єднання по **всіх** approved-планах: динамічна декомпозиція додає
+/// `plan_NNN+1`, і діти раніше схвалених планів легітимності не втрачають.
+/// `None` — approved-плану немає взагалі, тобто легітимізувати дітей нічим.
+pub(crate) fn approved_child_ids(dir: &Path) -> Option<HashSet<String>> {
+    let mut ids = HashSet::new();
+    let mut has_approved = false;
+    for entry in fs::read_dir(dir).ok()?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(nnn) = name
+            .strip_prefix("plan-approved_")
+            .and_then(|r| r.strip_suffix(".md"))
+        else {
+            continue;
+        };
+        has_approved = true;
+        let Ok(plan) = fs::read_to_string(dir.join(format!("plan_{nnn}.md"))) else {
+            continue;
+        };
+        let Some(section) = children_section(&plan) else {
+            continue;
+        };
+        if let Ok(children) = parse_children(&section) {
+            ids.extend(children.into_iter().map(|c| c.id));
+        }
+    }
+    has_approved.then_some(ids)
+}
+
 fn children_section(plan: &str) -> Option<String> {
     let mut lines = plan.lines();
     let mut section = Vec::new();
