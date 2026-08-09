@@ -34,6 +34,7 @@ guard перевіряє весь Rust-код у `crates/`, включно з te
 ### Task 1: Add the gix facade and static boundary
 
 **Files:**
+
 - Modify: `Cargo.toml`
 - Modify: `crates/mt-core/Cargo.toml`
 - Create: `crates/mt-core/src/git/mod.rs`
@@ -46,6 +47,7 @@ guard перевіряє весь Rust-код у `crates/`, включно з te
 - Test: `crates/mt-core/tests/git_boundary.rs`
 
 **Interfaces:**
+
 - Produces: `GitRepository::open(path: &Path) -> Result<GitRepository, GitError>`.
 - Produces: `ClaimRef`, `RunRef`, `RemoteUpdate`, `RemoteUpdateResult` and `GitError`.
 - Consumed by every later task.
@@ -102,6 +104,7 @@ git commit -m "feat(git): add gix facade boundary"
 ### Task 2: Replace discovery, origin and local-ref reads
 
 **Files:**
+
 - Modify: `crates/mt-core/src/git/mod.rs`
 - Modify: `crates/mt-core/src/claims.rs:40-47`
 - Modify: `crates/mt/src/commands/doctor.rs:31-53`
@@ -110,6 +113,7 @@ git commit -m "feat(git): add gix facade boundary"
 - Test: `crates/mt/tests/cli.rs`
 
 **Interfaces:**
+
 - Consumes: `GitRepository` and typed refs from Task 1.
 - Produces: `repo_root()`, `origin_url()`, `resolve_ref()`, `read_blob_at_commit()`, `linked_worktrees()`.
 
@@ -149,11 +153,13 @@ Commit: `git add crates/mt-core crates/mt && git commit -m "feat(git): use gix f
 ### Task 3: Move claim object creation and remote reads to gix
 
 **Files:**
+
 - Modify: `crates/mt-core/src/git/mod.rs`
 - Modify: `crates/mt-core/src/claims.rs:138-365`
 - Test: `crates/mt-core/src/claims.rs`
 
 **Interfaces:**
+
 - Produces: `write_commit(parent, files, message, signature)`, `list_remote_refs(pattern)`, `fetch_exact_ref(refname)`.
 - Preserves: `ClaimInfo`, `ClaimFields`, `parse_ls_remote`, `acquire_claim` public behavior.
 
@@ -191,12 +197,14 @@ Commit: `git add crates/mt-core && git commit -m "feat(git): create and read cla
 ### Task 4: Migrate CAS claim and run-ref transport
 
 **Files:**
+
 - Modify: `crates/mt-core/src/git/mod.rs`
 - Modify: `crates/mt-core/src/claims.rs:240-334`
 - Modify: `crates/mt-core/src/worktree.rs:79-111`
 - Test: `crates/mt-core/tests/remote_cas.rs`
 
 **Interfaces:**
+
 - Produces: `push_with_expected(refname, new_target, expected_target)` and `delete_with_expected(refname, expected_target)`.
 - Consumed by: runner, agent server and fenced publish.
 
@@ -236,6 +244,7 @@ Commit: `git add crates/mt-core && git commit -m "feat(git): move claim CAS tran
 ### Task 5: Migrate index, status and commits
 
 **Files:**
+
 - Modify: `crates/mt-core/src/git/mod.rs`
 - Modify: `crates/mt-core/src/runner.rs:461-530`
 - Modify: `crates/agent-server/src/graph.rs:69-370`
@@ -243,6 +252,7 @@ Commit: `git add crates/mt-core && git commit -m "feat(git): move claim CAS tran
 - Test: `crates/agent-server/tests/graph_wiring.rs`
 
 **Interfaces:**
+
 - Produces: `commit_all_if_changed(message, SignaturePolicy) -> Result<Option<ObjectId>, GitError>` and `remove_from_index(path)`.
 - Preserves: author/committer `mt-runner <mt-runner@localhost>` where current runner uses it.
 
@@ -282,6 +292,7 @@ Commit: `git add crates/mt-core crates/agent-server && git commit -m "feat(git):
 ### Task 6: Isolate unsupported porcelain in compat
 
 **Files:**
+
 - Create: `crates/mt-core/src/git/compat.rs`
 - Modify: `crates/mt-core/src/git/mod.rs`
 - Modify: `crates/mt-core/src/worktree.rs:52-157,264-280,320-345`
@@ -290,6 +301,7 @@ Commit: `git add crates/mt-core crates/agent-server && git commit -m "feat(git):
 - Test: `crates/mt-core/tests/git_compat.rs`
 
 **Interfaces:**
+
 - Produces: the five allow-listed `compat` methods from Global Constraints.
 - Native facade remains responsible for `fetch`, SHA resolution and post-publish local inspection.
 
@@ -331,6 +343,7 @@ Commit: `git add crates/mt-core && git commit -m "refactor(git): isolate unsuppo
 ### Task 7: Convert all test fixtures and CLI tests to gix
 
 **Files:**
+
 - Modify: `crates/mt-core/src/test_support.rs`
 - Modify: `crates/mt/tests/common/mod.rs`
 - Modify: `crates/mt/tests/cli.rs`
@@ -340,6 +353,7 @@ Commit: `git add crates/mt-core && git commit -m "refactor(git): isolate unsuppo
 - Test: `crates/mt-core/tests/git_boundary.rs`
 
 **Interfaces:**
+
 - Produces: `TestRepo::new()` creating bare remote, work repo, initial commit and origin entirely through gix.
 - Removes: test-only generic `git(dir, args)` helpers.
 
@@ -377,10 +391,12 @@ Commit: `git add crates && git commit -m "test(git): build fixtures through gix"
 ### Task 8: Enforce the end state and publish migration evidence
 
 **Files:**
+
 - Modify: `crates/mt-core/tests/git_boundary.rs`
 - Modify: `docs/superpowers/specs/2026-07-29-gix-migration-design.md`
 
 **Interfaces:**
+
 - Produces: permanent capability-matrix test and updated design status with exact compat allow-list.
 
 - [x] **Step 1: Write final enforcement tests**
