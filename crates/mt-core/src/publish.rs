@@ -166,6 +166,138 @@ pub fn fenced_publish(
     })
 }
 
+/// Публікація **failure-сімейства** (git.md): термінальний `run_NNN.md` іде
+/// окремим fenced push поверх свіжого `origin/main`.
+///
+/// Викликається, коли основна публікація результату провалилась термінально
+/// — конфлікт rebase або вичерпані retry. Робочий worktree у цей момент уже
+/// непридатний як джерело пушу (rebase міг лишити його в конфліктному
+/// стані), тому файл публікується з **окремого** ефемерного worktree від
+/// актуального `origin/main`.
+///
+/// За спекою робочий worktree і run ref **не чіпаються** — вони лишаються
+/// для debug; звільняється лише claim, тим самим atomic push (CAS-delete).
+/// Тому `push` тут несе два refspec-и (main + видалення claim), а не три,
+/// як у [`fenced_publish`].
+#[allow(clippy::too_many_arguments)]
+pub fn publish_failure_run(
+    repo_root: &Path,
+    worktrees_dir: &Path,
+    req: &PublishRequest,
+    rel_path: &str,
+    content: &str,
+    retry_max: u32,
+    base_ms: u64,
+) -> Result<PublishOutcome, String> {
+    let claim_ref = format!("{CLAIM_REF_PREFIX}/{}", req.node_hash);
+    let repository = GitRepository::open(repo_root).map_err(|error| error.to_string())?;
+    let fenced_out = |attempt: u32| PublishOutcome {
+        published: false,
+        fenced: true,
+        result_sha: None,
+        attempts: attempt + 1,
+    };
+
+    for attempt in 0..retry_max.max(1) {
+        repository
+            .fetch_refspec("+refs/heads/main:refs/remotes/origin/main")
+            .map_err(|error| error.to_string())?;
+        if repository
+            .fetch_refspec(&format!("+{claim_ref}:{claim_ref}"))
+            .is_err()
+        {
+            return Ok(fenced_out(attempt));
+        }
+        match repository.resolve_ref(&claim_ref) {
+            Ok(sha) if sha == req.claim_sha => {}
+            _ => return Ok(fenced_out(attempt)),
+        }
+
+        let main_sha_before = repository
+            .resolve_ref("refs/remotes/origin/main")
+            .map_err(|error| error.to_string())?;
+
+        // Ефемерний worktree саме під цей запис; окремий token, щоб не
+        // зіткнутись із робочим worktree того самого run-у.
+        let token = format!("{}-failure-{attempt}", req.token);
+        let wt = crate::worktree::create_run_worktree(
+            repo_root,
+            worktrees_dir,
+            req.node_hash,
+            &token,
+            &main_sha_before,
+        )?;
+
+        let write_and_commit = || -> Result<Option<String>, String> {
+            let target = wt.join(rel_path);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            std::fs::write(&target, content).map_err(|error| error.to_string())?;
+            GitRepository::open(&wt)
+                .map_err(|error| error.to_string())?
+                .commit_all_if_changed(
+                    &format!("mt: {rel_path}"),
+                    crate::git::SignaturePolicy::Runner,
+                )
+                .map_err(|error| error.to_string())
+        };
+
+        let committed = write_and_commit();
+        let pushed = match &committed {
+            Ok(Some(result_sha)) => {
+                let lease_main = format!("--force-with-lease=refs/heads/main:{main_sha_before}");
+                let lease_claim = format!("--force-with-lease={claim_ref}:{}", req.claim_sha);
+                let main_refspec = format!("{result_sha}:refs/heads/main");
+                let claim_refspec = format!(":{claim_ref}");
+                compat::push_atomic(
+                    &wt,
+                    &[
+                        "push",
+                        "--atomic",
+                        &lease_main,
+                        &lease_claim,
+                        "origin",
+                        &main_refspec,
+                        &claim_refspec,
+                    ],
+                )
+                .map_err(|error| error.to_string())
+            }
+            Ok(None) => Err("failure-run: нема чого комітити".to_string()),
+            Err(error) => Err(error.clone()),
+        };
+
+        // Ефемерний worktree прибираємо завжди — на відміну від робочого,
+        // debug-цінності він не має.
+        let _ = crate::worktree::remove_run_worktree(repo_root, &wt);
+
+        match (pushed, committed) {
+            (Ok(true), Ok(Some(result_sha))) => {
+                let _ = sync_local_main(repo_root, &result_sha);
+                return Ok(PublishOutcome {
+                    published: true,
+                    fenced: false,
+                    result_sha: Some(result_sha),
+                    attempts: attempt + 1,
+                });
+            }
+            (Err(error), _) => return Err(error),
+            _ => {}
+        }
+
+        let backoff = base_ms.saturating_mul(1u64 << attempt.min(16));
+        std::thread::sleep(Duration::from_millis(backoff + jitter_ms(base_ms)));
+    }
+
+    Ok(PublishOutcome {
+        published: false,
+        fenced: false,
+        result_sha: None,
+        attempts: retry_max,
+    })
+}
+
 /// Best-effort ff-only синхронізація локального `main` після власного
 /// publish — щоб живий working tree (яке бачить FS-watcher GUI) одразу
 /// відобразило результат без ручного `git pull`. Мовчки ігнорує невдачу
@@ -208,6 +340,107 @@ mod tests {
         push_run_ref(&wt, &hash, "tok1").unwrap();
 
         (hash, claim, wt)
+    }
+
+    // ── failure-сімейство (git.md) ──
+
+    #[test]
+    fn failure_run_published_claim_released_run_ref_kept() {
+        let repo = TestRepo::new();
+        let (hash, claim, wt) = setup(&repo);
+        let base = repo.main_sha();
+        let worktrees_dir = tempfile::tempdir().unwrap();
+
+        let req = PublishRequest {
+            worktree: &wt,
+            node_hash: &hash,
+            claim_sha: &claim.commit_sha,
+            token: "tok1",
+            run_ref_sha_before: &base,
+        };
+        let outcome = publish_failure_run(
+            repo.work.path(),
+            worktrees_dir.path(),
+            &req,
+            "mt/research/analyze/run_001.md",
+            "---\nschema_version: 1\nresult: merge-conflict\n---\n",
+            8,
+            10,
+        )
+        .unwrap();
+
+        assert!(outcome.published, "{outcome:?}");
+        assert!(!outcome.fenced);
+        // Run-файл у origin/main; claim звільнено; run ref лишився для debug.
+        assert!(repo
+            .work
+            .path()
+            .join("mt/research/analyze/run_001.md")
+            .is_file());
+        assert!(!remote_ref_exists(
+            repo.work.path(),
+            &format!("refs/mt/claims/{hash}")
+        ));
+        assert!(remote_ref_exists(
+            repo.work.path(),
+            &format!("refs/mt/runs/{hash}/tok1")
+        ));
+        // Робочий worktree не чіпали.
+        assert!(wt.is_dir());
+    }
+
+    #[test]
+    fn failure_run_is_fenced_when_claim_taken_over() {
+        let repo = TestRepo::new();
+        let (hash, claim, wt) = setup(&repo);
+        let base = repo.main_sha();
+        let worktrees_dir = tempfile::tempdir().unwrap();
+
+        let fields2 = ClaimFields {
+            node: "research/analyze",
+            actor: "agent",
+            runner_id: "test/2",
+            claimed_at: "2026-06-09T10:05:00Z",
+            lease_until: "2030-01-01T00:00:00Z",
+            token: "tok2",
+            generation: 2,
+            base_sha: &base,
+            run_ref: "refs/mt/runs/x/tok2",
+            interactive: false,
+        };
+        crate::claims::renew_or_takeover_claim(
+            repo.work.path(),
+            &hash,
+            &claim.commit_sha,
+            &fields2,
+        )
+        .unwrap();
+
+        let req = PublishRequest {
+            worktree: &wt,
+            node_hash: &hash,
+            claim_sha: &claim.commit_sha,
+            token: "tok1",
+            run_ref_sha_before: &base,
+        };
+        let outcome = publish_failure_run(
+            repo.work.path(),
+            worktrees_dir.path(),
+            &req,
+            "mt/research/analyze/run_001.md",
+            "---\nresult: merge-conflict\n---\n",
+            2,
+            5,
+        )
+        .unwrap();
+
+        // Чужий claim не чіпаємо навіть заради запису провалу.
+        assert!(!outcome.published);
+        assert!(outcome.fenced);
+        assert!(remote_ref_exists(
+            repo.work.path(),
+            &format!("refs/mt/claims/{hash}")
+        ));
     }
 
     #[test]
