@@ -156,7 +156,7 @@ function splitFlowItems(inner) {
 }
 
 /**
- * Розбирає inline-масив `[a, 'b, c', true]` у справжній масив, поміченний FLOW_FLAG
+ * Розбирає inline-масив `[a, 'b, c', true]` у справжній масив, помічений FLOW_FLAG
  * для збереження inline-формату при серіалізації.
  * @param {string} value повний текст значення разом із дужками
  * @returns {unknown[]} розібраний масив
