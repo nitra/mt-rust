@@ -309,6 +309,107 @@ fn failed_streak(dir: &Path) -> u64 {
         .count() as u64
 }
 
+/// Сума `wall_sec` усіх run-ів вузла — вхід третього тригера `unresolvable`
+/// (chain-ліміт часу, graph.md).
+fn total_wall_sec(dir: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name();
+            let s = name.to_string_lossy();
+            s.starts_with("run_") && s.ends_with(".md")
+        })
+        .filter_map(|e| {
+            let content = fs::read_to_string(e.path()).ok()?;
+            frontmatter::parse_front_matter(&content)
+                .get("wall_sec")
+                .and_then(serde_json::Value::as_u64)
+        })
+        .sum()
+}
+
+fn count_files(dir: &Path, prefix: &str, suffix: &str) -> u64 {
+    fs::read_dir(dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name();
+            let s = name.to_string_lossy();
+            s.starts_with(prefix) && s.ends_with(suffix)
+        })
+        .count() as u64
+}
+
+/// Чому вузол став термінально нерозв'язним (graph.md, три тригери
+/// `unresolvable`) — або `None`, якщо жоден не спрацював.
+///
+/// Тригери навмисно різнорідні: вичерпана драбина виконання, вичерпана
+/// драбина *планування* і вичерпаний сумарний бюджет часу. Кожен окремо
+/// означає «автомат більше не має ходів», і вихід із стану лише людський —
+/// `mt invalidate` з правкою `task.md`, `mt kill` або engineer на предку.
+///
+/// `budget_total_sec` опційний (спека): не заданий — тригер неактивний.
+pub fn unresolvable_reason(dir: &Path, config: &serde_json::Value) -> Option<String> {
+    let num = |key: &str, default: u64| {
+        config
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(default)
+    };
+
+    let exhausted = num("agent_retry_max", 3) + num("engineer_retry_max", 1);
+    let streak = failed_streak(dir);
+    if streak >= exhausted {
+        return Some(format!(
+            "вичерпано драбину виконання: {streak} провалів поспіль ≥ agent_retry_max + engineer_retry_max ({exhausted})"
+        ));
+    }
+
+    let rejects = count_files(dir, "plan-rejected_", ".md");
+    let reject_max = num("plan_reject_max", 3);
+    if rejects >= reject_max {
+        return Some(format!(
+            "вичерпано драбину планування: {rejects} відхилених планів ≥ plan_reject_max ({reject_max})"
+        ));
+    }
+
+    if let Some(limit) = config
+        .get("budget_total_sec")
+        .and_then(serde_json::Value::as_u64)
+    {
+        let spent = total_wall_sec(dir);
+        if spent > limit {
+            return Some(format!(
+                "вичерпано сумарний бюджет: {spent}s > budget_total_sec ({limit}s)"
+            ));
+        }
+    }
+
+    None
+}
+
+/// Пише термінальний маркер `unresolvable.md`. Ідемпотентно: маркер
+/// immutable, тож наявний не перезаписується.
+pub fn write_unresolvable(dir: &Path, reason: &str) -> Result<bool, String> {
+    let path = dir.join("unresolvable.md");
+    if path.exists() {
+        return Ok(false);
+    }
+    let content = format!(
+        "---\nschema_version: 1\ncreated_at: {}\n---\n\n## Reason\n\n{reason}\n\n\
+         ## Next\n\nВихід лише людський: `mt invalidate <вузол>` із правкою `task.md`, \
+         `mt kill <вузол>`, або `mt run <предок> --actor engineer`.\n",
+        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    );
+    write_atomic(&path, &content)?;
+    Ok(true)
+}
+
 // ── State detection ───────────────────────────────────────────────────────────
 
 // Reads result: field from audit-result frontmatter (only exception to name-based state rule).
@@ -1513,6 +1614,111 @@ mod tests {
             ("run_005.md", "---\nresult: failed\n---\n"),
         ];
         assert_eq!(state_of("task", &files, &[], None), TaskState::Failed);
+    }
+
+    // ── три тригери unresolvable (graph.md) ──
+
+    /// Директорія вузла з набором файлів + конфіг; повертає причину.
+    fn reason_for(files: &[(&str, &str)], config: serde_json::Value) -> Option<String> {
+        let root = tempdir().unwrap();
+        let dir = root.path().join("node");
+        fs::create_dir_all(&dir).unwrap();
+        for (name, content) in files {
+            fs::write(dir.join(name), content).unwrap();
+        }
+        unresolvable_reason(&dir, &config)
+    }
+
+    fn failed_run(n: u64) -> (String, String) {
+        (
+            format!("run_{n:03}.md"),
+            "---\nschema_version: 1\nresult: failed\nwall_sec: 100\n---\n".to_string(),
+        )
+    }
+
+    #[test]
+    fn no_trigger_on_healthy_node() {
+        let runs: Vec<_> = (1..=2).map(failed_run).collect();
+        let files: Vec<(&str, &str)> = runs
+            .iter()
+            .map(|(n, c)| (n.as_str(), c.as_str()))
+            .collect();
+        // streak 2 < 3+1 → ще ретраїмо.
+        assert!(reason_for(&files, serde_json::json!({})).is_none());
+    }
+
+    #[test]
+    fn trigger_execution_ladder_exhausted() {
+        let runs: Vec<_> = (1..=4).map(failed_run).collect();
+        let files: Vec<(&str, &str)> = runs
+            .iter()
+            .map(|(n, c)| (n.as_str(), c.as_str()))
+            .collect();
+        // agent_retry_max 3 + engineer_retry_max 1 = 4.
+        let reason = reason_for(&files, serde_json::json!({})).expect("має спрацювати");
+        assert!(reason.contains("драбину виконання"), "got: {reason}");
+    }
+
+    #[test]
+    fn trigger_planning_ladder_exhausted() {
+        let files = [
+            ("plan-rejected_001.md", ""),
+            ("plan-rejected_002.md", ""),
+            ("plan-rejected_003.md", ""),
+        ];
+        let reason = reason_for(&files, serde_json::json!({})).expect("має спрацювати");
+        assert!(reason.contains("драбину планування"), "got: {reason}");
+    }
+
+    #[test]
+    fn trigger_total_budget_exceeded() {
+        let runs: Vec<_> = (1..=2).map(failed_run).collect();
+        let files: Vec<(&str, &str)> = runs
+            .iter()
+            .map(|(n, c)| (n.as_str(), c.as_str()))
+            .collect();
+        // 2 × 100s > 150s.
+        let reason =
+            reason_for(&files, serde_json::json!({"budget_total_sec": 150})).expect("має спрацювати");
+        assert!(reason.contains("сумарний бюджет"), "got: {reason}");
+    }
+
+    #[test]
+    fn total_budget_trigger_is_opt_in() {
+        let runs: Vec<_> = (1..=2).map(failed_run).collect();
+        let files: Vec<(&str, &str)> = runs
+            .iter()
+            .map(|(n, c)| (n.as_str(), c.as_str()))
+            .collect();
+        // Без budget_total_sec третій тригер неактивний (спека: опційний).
+        assert!(reason_for(&files, serde_json::json!({})).is_none());
+    }
+
+    #[test]
+    fn write_unresolvable_is_idempotent() {
+        let root = tempdir().unwrap();
+        let dir = root.path().join("node");
+        fs::create_dir_all(&dir).unwrap();
+        assert!(write_unresolvable(&dir, "перша причина").unwrap());
+        // Маркер immutable — повторний виклик не перезаписує.
+        assert!(!write_unresolvable(&dir, "інша причина").unwrap());
+        let content = fs::read_to_string(dir.join("unresolvable.md")).unwrap();
+        assert!(content.contains("перша причина"));
+        assert!(content.contains("schema_version: 1"));
+    }
+
+    #[test]
+    fn unresolvable_marker_wins_over_failed_state() {
+        // Термінальний стан має пріоритет над «ще ретраїмо».
+        let files = [
+            ("task.md", "---\nschema_version: 1\n---\n"),
+            ("a.md", "---\nschema_version: 1\n---\n"),
+            ("run_001.md", "---\nresult: failed\n---\n"),
+            ("run_002.md", "---\nresult: failed\n---\n"),
+            ("run_003.md", "---\nresult: failed\n---\n"),
+            ("unresolvable.md", "---\nschema_version: 1\n---\n"),
+        ];
+        assert_eq!(state_of("task", &files, &[], None), TaskState::Unresolvable);
     }
 
     // ── unresolvable ──

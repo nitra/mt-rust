@@ -51,7 +51,7 @@
 | Git-межа (`gix` + вузький shim) | РЕАЛІЗОВАНО | `git/` | — |
 | Аудит-цикл (auditor, clarification, amend) | ВІДСУТНЄ | — | Пишеться лише `pending-audit_NNN.md`; актора, `audit-result_NNN.md`, `clarification`/`amended` немає |
 | EngineerAgent | ВІДСУТНЄ | — | Немає `--actor engineer`, GraphPatch |
-| `unresolvable` (3 тригери + алерт) | ВІДСУТНЄ | — | Маркер лише читається, ніхто не пише |
+| `unresolvable` (3 тригери + алерт) | ЧАСТКОВО | `lib.rs` `unresolvable_reason`/`write_unresolvable`; тригери — `runner.rs` (перед комітом), `spawn.rs` `spawn_reject` | Алерт власнику (relay push) — потребує orchestrator-ролі й relay-шляху (хвиля 3) |
 | Recurrence | ВІДСУТНЄ | — | Уся глава `recurrence.md` |
 | Secrets broker / sandbox `skill_profiles` | ВІДСУТНЄ | — | `a.md.secrets` не інжектиться, allowlist немає |
 | `.mt.json` — дефолти для реалізованого | РЕАЛІЗОВАНО | `config.rs` `config_defaults` | — (ключі нереалізованих фіч свідомо без дефолтів, див. «Закриті питання») |
@@ -108,7 +108,7 @@
 Порядок обраний так, щоб кожна наступна хвиля спиралась на замкнений інваріант попередньої, а не на обіцянку.
 
 1. **Контрактний борг — ✅ закрито.** `failed_streak` (категорія + межа), формат `a.md`/`h.md`, видалення `mt-napi`, `schema_version` fail-closed, гейт immutability, дефолти `.mt.json`, `orphan-node`, матеріалізація `result: merge-conflict`.
-2. **Замкнути M0 як автономний цикл.** Stage 1 + контекст агента, аудит-цикл, `unresolvable` з трьома тригерами, EngineerAgent, git-протокол для spawn/invalidate/kill. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах.
+2. **Замкнути M0 як автономний цикл.** Лишилось: Stage 1 + контекст агента, аудит-цикл, EngineerAgent, git-протокол для spawn/invalidate/kill. **Закрито:** `unresolvable` з трьома тригерами (крім алерту — він потребує relay-шляху хвилі 3). Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах.
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
 4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store, auth, push-транспорт, `HandoffRequest` через relay, presence.
 5. **M6 фаза 0 — модельний трек Дельти.** Паралельно від хвилі 2, як велить roadmap: `mandates.yaml` (включно з `kind: model` і `audacity`), `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision`, квіз-гейт, конверсія вичерпаної драбини в розвилку. Соціальних ризиків нема — механіка обкатується на моделях.

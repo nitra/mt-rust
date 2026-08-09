@@ -457,6 +457,16 @@ pub fn spawn_reject(tasks_dir: &str, node_path: &str, reason: &str) -> Result<St
             reason.trim()
         ),
     )?;
+    // Тригер 2 `unresolvable` (graph.md): планувальник вичерпав спроби —
+    // перевіряємо одразу після запису відмови, поки лічильник актуальний.
+    let config = crate::config::merge_config(
+        fs::read_to_string(Path::new(tasks_dir).join("../.mt.json"))
+            .ok()
+            .as_deref(),
+    );
+    if let Some(reason) = crate::unresolvable_reason(&dir, &config) {
+        crate::write_unresolvable(&dir, &reason)?;
+    }
     Ok(rejected_file)
 }
 
