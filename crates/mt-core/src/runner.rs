@@ -851,6 +851,14 @@ pub fn run_node_env(
         (result, run_file, None, Vec::new())
     };
 
+    // Термінальний маркер пишеться ДО коміту, щоб піти тим самим fenced
+    // push, що й run: інакше вузол на мить лишався б у стані «ще ретраїмо»
+    // з уже вичерпаною драбиною, і наступний прохід оркестратора взяв би
+    // його в роботу знову.
+    if let Some(reason) = crate::unresolvable_reason(&dir, &config) {
+        crate::write_unresolvable(&dir, &reason)?;
+    }
+
     commit_worktree(
         &worktree,
         &format!("mt: {node_path} run {nnn_s} ({result})"),

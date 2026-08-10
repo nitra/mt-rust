@@ -25,6 +25,10 @@ pub fn config_defaults() -> Value {
         "budget_hard_sec_multiplier": 3,
         "progress_timeout_sec": 300,
         "agent_retry_max": 3,
+        // Спека фіксує лише agent_retry_max (3); ці два — вибір реалізації
+        // (graph.md їх називає, значень не задає).
+        "engineer_retry_max": 1,
+        "plan_reject_max": 3,
         "agent_concurrency": 5,
         "claim_lease_sec": 3600,
         "claim_grace_sec": 60,
