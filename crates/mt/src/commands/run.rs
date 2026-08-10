@@ -3,7 +3,6 @@
 
 use clap::Args;
 use mt_core::orchestrate::run_auto;
-use mt_core::runner::run_node;
 
 use crate::context::{resolve_node_path, resolve_tasks_dir};
 use crate::output::emit;
@@ -11,12 +10,20 @@ use crate::output::emit;
 #[derive(Args)]
 pub struct RunArgs {
     pub name: Option<String>,
+    /// `engineer` — ремонтник графа після вичерпання драбини агента.
+    #[arg(long)]
+    pub actor: Option<String>,
 }
 
 pub fn run(args: RunArgs, json: bool) -> Result<(), String> {
     let tasks_dir = resolve_tasks_dir(false)?;
     let node_path = resolve_node_path(args.name, &tasks_dir)?;
-    let outcome = run_node(&tasks_dir, &node_path)?;
+    let actor = match args.actor.as_deref() {
+        None | Some("agent") => mt_core::runner::Actor::Agent,
+        Some("engineer") => mt_core::runner::Actor::Engineer,
+        Some(other) => return Err(format!("невідомий актор `{other}` — agent | engineer")),
+    };
+    let outcome = mt_core::runner::run_node_as(&tasks_dir, &node_path, actor)?;
     emit(json, &outcome, |o| {
         println!("{}: {} ({})", node_path, o.result, o.run_file);
     });
