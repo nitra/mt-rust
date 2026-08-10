@@ -436,10 +436,97 @@ pub fn spawn_approve(tasks_dir: &str, node_path: &str) -> Result<SpawnOutcome, S
         &dir.join(&approved_file),
         &format!("{}\n## Children\n\n{list}\n", decision_frontmatter()),
     )?;
+
+    // graph.md: `plan-approved_NNN.md` + файли дітей ідуть у main ОДНИМ
+    // atomic commit. Інакше можливий частковий підграф: діти вже видимі
+    // сканеру, а рішення про їх легітимність — ще ні (або навпаки), і
+    // orphan-node-перевірка бачила б суперечливий стан.
+    publish_spawn(tasks_dir, &dir, &created, &approved_file, node_path)?;
+
     Ok(SpawnOutcome {
         approved_file,
         children: created,
     })
+}
+
+/// Файли директорії рекурсивно — шляхами відносно кореня репо.
+fn files_under(repo_root: &Path, dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(files_under(repo_root, &path));
+        } else if let Ok(rel) = path.strip_prefix(repo_root) {
+            out.push(rel.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Публікує матеріалізований підграф одним atomic commit.
+///
+/// Fail-open поза git-репозиторієм: `spawn` працює і на голому дереві
+/// (тести, локальні чернетки) — там публікувати нікуди, файли просто
+/// лишаються на диску.
+fn publish_spawn(
+    tasks_dir: &str,
+    node_dir: &Path,
+    created: &[String],
+    approved_file: &str,
+    node_path: &str,
+) -> Result<(), String> {
+    let Ok(repo_root) = crate::claims::discover_main_worktree_root(Path::new(tasks_dir)) else {
+        return Ok(());
+    };
+    let config = crate::config::merge_config(
+        fs::read_to_string(repo_root.join(".mt.json")).ok().as_deref(),
+    );
+
+    let mut changes: Vec<crate::publish::FileChange> = Vec::new();
+    let mut add = |abs: &Path| -> Result<(), String> {
+        let Ok(rel) = abs.strip_prefix(&repo_root) else {
+            return Ok(());
+        };
+        let content = fs::read_to_string(abs).map_err(|e| e.to_string())?;
+        changes.push((rel.to_string_lossy().replace('\\', "/"), Some(content)));
+        Ok(())
+    };
+    for child in created {
+        for rel in files_under(&repo_root, &node_dir.join(child)) {
+            add(&repo_root.join(rel))?;
+        }
+    }
+    add(&node_dir.join(approved_file))?;
+
+    let worktrees_dir = crate::runner::worktrees_dir_path(&repo_root, &config);
+    let retry_max = config
+        .get("publish_retry_max")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(8) as u32;
+    let base_ms = config
+        .get("publish_retry_base_ms")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(250);
+
+    let outcome = crate::publish::publish_lifecycle(
+        &repo_root,
+        &worktrees_dir,
+        &changes,
+        &format!("mt: spawn {node_path} ({} дітей)", created.len()),
+        retry_max,
+        base_ms,
+    )?;
+    if !outcome.published {
+        return Err(
+            "spawn: вичерпано publish retry — підграф лишився локальним, повторіть пізніше"
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 /// `mt spawn --reject --reason`: пише `plan-rejected_NNN.md`; вузол
@@ -526,6 +613,58 @@ mod tests {
         assert_eq!(children[1].mode.as_deref(), Some("human"));
         assert!(!children[1].export);
         assert_eq!(children[1].deps, ["collect-data"]);
+    }
+
+    #[test]
+    fn approve_publishes_subgraph_as_one_commit() {
+        // Головна вимога graph.md: діти й рішення про їх легітимність
+        // потрапляють у main разом, одним комітом — часткового підграфа
+        // (діти без approved-плану або навпаки) не існує.
+        let repo = crate::test_support::TestRepo::new();
+        let tasks_root = repo.work.path().join("mt");
+        let node = tasks_root.join("research");
+        fs::create_dir_all(&node).unwrap();
+        fs::write(
+            node.join("task.md"),
+            "---\nschema_version: 1\ncreated_at: 2026-06-06T10:00:00Z\nbudget_sec: 600\n---\n\n## Task\n",
+        )
+        .unwrap();
+        fs::write(node.join("plan_001.md"), PLAN).unwrap();
+        crate::test_support::commit_all(repo.work.path(), "add node");
+        crate::test_support::push_head(repo.work.path(), "refs/heads/main");
+
+        let root = tasks_root.to_string_lossy().into_owned();
+        let out = spawn_approve(&root, "research").unwrap();
+        assert_eq!(out.children, ["collect-data", "analyze"]);
+
+        // Один коміт у main несе і рішення, і обох дітей.
+        let main_sha = crate::git::GitRepository::open(repo.work.path())
+            .unwrap()
+            .resolve_ref("refs/remotes/origin/main")
+            .unwrap();
+        let blob = |path: &str| {
+            crate::git::GitRepository::open(repo.work.path())
+                .unwrap()
+                .read_blob_at_commit(&main_sha, path)
+                .is_ok()
+        };
+        assert!(blob("mt/research/plan-approved_001.md"), "рішення в main");
+        assert!(blob("mt/research/collect-data/task.md"), "перша дитина");
+        assert!(blob("mt/research/analyze/task.md"), "друга дитина");
+        assert!(blob("mt/research/collect-data/a.md"), "прапор дитини");
+        assert!(blob("mt/research/analyze/h.md"), "human-прапор дитини");
+        // Ребро deps теж у тому самому коміті.
+        assert!(blob("mt/research/analyze/deps/research/collect-data.md"));
+    }
+
+    #[test]
+    fn approve_works_without_git_repo() {
+        // Fail-open: spawn лишається придатним на голому дереві (чернетки,
+        // тести) — публікувати нікуди, файли просто лишаються локально.
+        let (tmp, node) = fixture();
+        let root = tmp.path().to_string_lossy().into_owned();
+        assert!(spawn_approve(&root, &node).is_ok());
+        assert!(tmp.path().join("research/collect-data/task.md").is_file());
     }
 
     #[test]

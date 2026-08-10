@@ -44,8 +44,8 @@
 | `run-summary.md` | ВІДСУТНЄ | — | Генератора немає |
 | Сигнали `done`/`audit`/`failed`, `## Check` | РЕАЛІЗОВАНО | `signal.rs` | — |
 | Composite-агрегація вгору | РЕАЛІЗОВАНО | `signal.rs` `propagate_composite` | — |
-| Протокол spawn | ЧАСТКОВО | `spawn.rs` | Немає fenced atomic commit — файли лише на диску; немає `plan_reject_max` і ескалації |
-| `invalidate`/`kill` | ЧАСТКОВО | `lifecycle.rs` | Без git-протоколу: немає fenced publish, порівняння hash нового fact, поглинання running-вузлів |
+| Протокол spawn | РЕАЛІЗОВАНО | `spawn.rs` `spawn_approve`/`publish_spawn`, `publish.rs` `publish_lifecycle` | — (`plan_reject_max` закрито через `unresolvable`) |
+| Git-протокол `invalidate`/`kill` | ВІДСУТНЄ | `lifecycle.rs` | Примітив `publish_lifecycle` готовий; лишається порівняння hash нового fact і cascade, поглинання running-вузлів |
 | Оркестрація `run --auto` | ЧАСТКОВО | `orchestrate.rs` | Батчинг замість continuous backfill; немає periodic rescan, remote claims, wake |
 | Worktree lifecycle | РЕАЛІЗОВАНО | `worktree.rs` | — |
 | Git-межа (`gix` + вузький shim) | РЕАЛІЗОВАНО | `git/` | — |
@@ -108,7 +108,7 @@
 Порядок обраний так, щоб кожна наступна хвиля спиралась на замкнений інваріант попередньої, а не на обіцянку.
 
 1. **Контрактний борг — ✅ закрито.** `failed_streak` (категорія + межа), формат `a.md`/`h.md`, видалення `mt-napi`, `schema_version` fail-closed, гейт immutability, дефолти `.mt.json`, `orphan-node`, матеріалізація `result: merge-conflict`.
-2. **Замкнути M0 як автономний цикл.** Лишилось: Stage 1 (inline-планування), генератор `run-summary.md`, аудит-цикл, EngineerAgent, git-протокол для spawn/invalidate/kill. **Закрито:** `unresolvable` з трьома тригерами (крім алерту — потребує relay-шляху хвилі 3), контекст агента. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах.
+2. **Замкнути M0 як автономний цикл.** Лишилось: Stage 1 (inline-планування), генератор `run-summary.md`, аудит-цикл, EngineerAgent, git-протокол для invalidate/kill. **Закрито:** `unresolvable` з трьома тригерами (крім алерту — потребує relay-шляху хвилі 3), контекст агента, git-протокол spawn. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах.
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
 4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store, auth, push-транспорт, `HandoffRequest` через relay, presence.
 5. **M6 фаза 0 — модельний трек Дельти.** Паралельно від хвилі 2, як велить roadmap: `mandates.yaml` (включно з `kind: model` і `audacity`), `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision`, квіз-гейт, конверсія вичерпаної драбини в розвилку. Соціальних ризиків нема — механіка обкатується на моделях.
