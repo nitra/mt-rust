@@ -571,7 +571,11 @@ mod tests {
     #[test]
     fn audit_is_gated_too() {
         let (repo, tasks) = repo_node("solo");
-        fs::write(repo.work.path().join("mt/solo/task.md"), "---\nschema_version: 1\n---\n\n## Task\n\nпідмінено\n").unwrap();
+        fs::write(
+            repo.work.path().join("mt/solo/task.md"),
+            "---\nschema_version: 1\n---\n\n## Task\n\nпідмінено\n",
+        )
+        .unwrap();
         write_fact(&tasks, "solo", "Зроблено.", None).unwrap();
 
         assert!(audit(&tasks, "solo", "agent")

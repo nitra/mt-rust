@@ -1,31 +1,55 @@
+//! Ядро MT-графа (канон, який `@7n/mt` споживає через napi): скан дерева
+//! `mt/` у [`TaskNode`]-граф із виведенням станів ([`TaskState`]), прапори
+//! виконавця `a.md`/`h.md`, створення вузлів і нормалізація імен; доменні
+//! підсистеми (claims, runner, publish, orchestrate, …) — в окремих модулях.
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// Version-chain артефакти вузла: read-модель переліку `task/plan/run/fact/…` для GUI-timeline і CLI.
 pub mod artifacts;
+/// Аудит-цикл: закриття гейта, який відкриває `mt audit` (вердикт, уточнення, amend).
 pub mod audit;
+/// Remote execution claims: read-модель ownership вузлів через git refs `refs/mt/claims/<node-hash>`.
 pub mod claims;
+/// Конфігурація `.mt.json`: дефолти + merge рівнів у ефективний конфіг вузла.
 pub mod config;
+/// Мапінг handle → PII з git-ignored `.mt/directory.json` (у git-файлах лишаються лише handles).
 pub mod directory;
+/// Парсинг і байт-точна серіалізація YAML-frontmatter task-файлів.
 pub mod frontmatter;
+/// Єдина межа взаємодії mt-core з Git.
 pub mod git;
+/// Cost/time ledger: агрегація `wall_sec`/`tokens_*`/`cost_usd` з усіх `run_NNN.md` графу.
 pub mod ledger;
+/// Lifecycle-мутації вузла: `mt invalidate` і `mt kill` (архівація version chain у `history/`).
 pub mod lifecycle;
+/// NNN-нумерація артефактів (`run_NNN.md`, `fact_NNN.md`, …) — чисті функції над іменами файлів.
 pub mod nnn;
+/// Оркестратор `run --auto`: одноразовий прохід по `waiting` агентських вузлах чергами по `agent_concurrency`.
 pub mod orchestrate;
+/// Fenced publish protocol: atomic multi-ref push результату worktree у `main` з rebase і retry.
 pub mod publish;
+/// Run-wrapper: CAS claim → detached worktree → spawn виконавця → watchdog → підсумок стану.
 pub mod runner;
+/// Обгортка завершення виконавця: запис фактів, результатів і аудит-циклу вузла.
 pub mod signal;
+/// Протокол spawn: валідація `## Children` плану й матеріалізація дітей після plan-review.
 pub mod spawn;
+/// Тестові фікстури: версійні git-фіксації (bare `origin` + клон) для ізольованих тестів.
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod test_support;
+/// Іменування, матчінг і provisioning worktree для задач.
 pub mod worktree;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/// Стан вузла графа, виведений сканом файлового контракту (graph.md) —
+/// від `Unassigned` до термінальних `Resolved`/`Failed`/`Unresolvable`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskState {
@@ -43,6 +67,8 @@ pub enum TaskState {
     Unresolvable, // unresolvable.md exists (terminal)
 }
 
+/// Вузол MT-графа: ідентичність, стан, залежності, бюджети й діти —
+/// одиниця виводу `scan_tasks` для CLI/GUI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskNode {
     pub id: String,
@@ -65,6 +91,7 @@ pub struct TaskNode {
     pub warnings: Vec<String>,
 }
 
+/// Знайдений воркспейс із `mt/`-деревом: людська мітка + шлях до tasks-директорії.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceInfo {
     pub label: String,
@@ -94,7 +121,10 @@ pub fn write_executor_flag(
                 "skills": skills,
                 "interactive": false,
             });
-            write_atomic(&task_dir.join("a.md"), &frontmatter::build_markdown(&fm, ""))?;
+            write_atomic(
+                &task_dir.join("a.md"),
+                &frontmatter::build_markdown(&fm, ""),
+            )?;
             let _ = fs::remove_file(task_dir.join("h.md"));
             Ok("a.md")
         }
@@ -110,13 +140,17 @@ pub fn write_executor_flag(
             } else {
                 "<!-- Опишіть необхідну кваліфікацію виконавця у полі qualification -->\n"
             };
-            write_atomic(&task_dir.join("h.md"), &frontmatter::build_markdown(&fm, body))?;
+            write_atomic(
+                &task_dir.join("h.md"),
+                &frontmatter::build_markdown(&fm, body),
+            )?;
             let _ = fs::remove_file(task_dir.join("a.md"));
             Ok("h.md")
         }
     }
 }
 
+/// Виконавець вузла: `Agent` (прапор `a.md`) чи `Human` (прапор `h.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
@@ -485,8 +519,8 @@ fn is_running_marker(name: &str) -> bool {
     idx > 0 && rest[..idx].bytes().all(|b| b.is_ascii_digit())
 }
 
-// Sanitize task name for worktree comparison (mirrors JS sanitizeTaskName: [^A-Za-z0-9_-] → '-').
-// NOTE: must stay in sync with sanitizeTaskName in npm/lib/core/state.mjs (shared test vectors).
+/// Санітизує ім'я задачі для порівняння worktree: `[^A-Za-z0-9_-]` → `'-'`.
+/// ⚠️ Логіку синхронізовано з JS `sanitizeTaskName` у `npm/lib/core/state.mjs` (спільні тест-вектори).
 pub fn sanitize(name: &str) -> String {
     name.chars()
         .map(|c| {
@@ -1494,8 +1528,14 @@ mod tests {
         ];
         let w = warnings_of("task", &files);
         assert_eq!(w.len(), 2, "got: {w:?}");
-        assert!(w[0].starts_with("task.md:") && w[0].contains('5'), "got: {w:?}");
-        assert!(w[1].starts_with("a.md:") && w[1].contains("schema_version"), "got: {w:?}");
+        assert!(
+            w[0].starts_with("task.md:") && w[0].contains('5'),
+            "got: {w:?}"
+        );
+        assert!(
+            w[1].starts_with("a.md:") && w[1].contains("schema_version"),
+            "got: {w:?}"
+        );
     }
 
     #[test]
