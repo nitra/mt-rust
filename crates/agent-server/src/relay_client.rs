@@ -123,6 +123,9 @@ async fn handle_incoming(state: &Arc<AppState>, text: &str) {
     let Some(envelope) = frame.get("envelope") else {
         return;
     };
+    // Push «є нові події у задачі X» (runtime.md): хост ресканить негайно,
+    // не чекаючи fallback-таймера.
+    state.wake_orchestrator();
     let device_id = envelope
         .get("device_id")
         .and_then(Value::as_str)
