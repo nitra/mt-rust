@@ -384,6 +384,72 @@ fn prior_attempts(node_dir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// `decision:` актуального `plan_NNN.md` — atomic | composite.
+fn latest_plan_decision(dir: &Path) -> Option<String> {
+    let nnn = crate::max_nnn(dir, "plan_", ".md");
+    let content = fs::read_to_string(dir.join(format!("plan_{nnn:03}.md"))).ok()?;
+    crate::frontmatter::parse_front_matter(&content)
+        .get("decision")
+        .and_then(serde_json::Value::as_str)
+        .map(|s| s.trim().to_lowercase())
+}
+
+/// Чи потрібен Етап 1 (graph.md, «Два етапи виконання»).
+///
+/// Пропускаємо там, де рішення atomic/composite вже ухвалене: людський
+/// `hint: atomic` у `task.md` або будь-який наявний `plan_NNN.md` (зокрема
+/// від явного `mt plan`). Інакше кожна спроба платила б зайвим викликом
+/// моделі за рішення, яке вже прийнято.
+fn needs_planning(dir: &Path, task_fm: &serde_json::Value) -> bool {
+    let hint = task_fm
+        .get("hint")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim);
+    hint != Some("atomic") && crate::max_nnn(dir, "plan_", ".md") == 0
+}
+
+/// Промпт Етапу 1: вимагає рішення atomic/composite у `plan_NNN.md`.
+fn build_plan_prompt(
+    task_path: &str,
+    node_dir: &Path,
+    tasks_root: &Path,
+    system_prompt: Option<&Path>,
+    plan_nnn: u64,
+) -> String {
+    let mut blocks: Vec<String> = Vec::new();
+    if let Some(body) = system_prompt.and_then(file_body) {
+        blocks.push(format!("## Протокол виконання\n\n{body}"));
+    }
+    blocks.push(format!(
+        "## Етап 1 — планування: {task_path}\n\nРобоча директорія: {}",
+        node_dir.display()
+    ));
+    if let Some(body) = file_body(&node_dir.join("task.md")) {
+        blocks.push(format!("## task.md\n\n{body}"));
+    }
+    let deps = dep_facts(tasks_root, node_dir);
+    if !deps.is_empty() {
+        blocks.push(format!(
+            "## Результати залежностей\n\n{}",
+            deps.join("\n\n")
+        ));
+    }
+    blocks.push(format!(
+        "## Що зробити\n\nВиріши, чи задача **атомарна** (виконується одним прогоном), \
+         чи **складена** (розкладається на підзадачі), і створи файл `plan_{plan_nnn:03}.md`:\n\n\
+         ```markdown\n---\nschema_version: 1\ndecision: atomic\n---\n\n## Context\n\n<з чого виходиш>\n\n\
+         ## Approach\n\n<як робитимеш>\n```\n\n\
+         Якщо задача складена — `decision: composite` і секція `## Children` \
+         зі списком підзадач:\n\n\
+         ```markdown\n## Children\n\n```yaml\nchildren:\n  - id: collect-data\n    mode: agent\n    \
+         task: |\n      Що саме зробити\n  - id: analyze\n    mode: agent\n    deps: [collect-data]\n    \
+         task: Перевірити зібране\n```\n```\n\n\
+         `mode` обов'язковий для кожної дитини (`agent` або `human`). \
+         **Нічого більше на цьому етапі не роби** — саме виконання буде наступною фазою."
+    ));
+    blocks.join("\n\n")
+}
+
 /// Контекст агента за формулою graph.md:
 /// `[task.md] + [a.md|h.md] + [deps/] + [plan_*.md] + [Prior attempts] +
 /// [run-summary.md] + [audit-result_*.md]`, поверх протоколу поведінки
@@ -853,26 +919,19 @@ pub fn run_node_env(
     // Єдиний agent-шлях — підписочний CLI з каскадом по хмарних підписках
     // за rate-limit (node_executor видалено — PR #48).
     let mut used_agent_cli: Option<String> = None;
-    let watched: Option<WatchedOutcome> = {
-        // Контекст збирається з worktree — саме там актуальні артефакти
-        // вузла та його залежностей на момент цієї спроби.
-        let wt_tasks_root = worktree.join(&tasks_root_rel);
-        let system_prompt = config
-            .get("system_prompt")
-            .and_then(serde_json::Value::as_str)
-            .map(|rel| worktree.join(rel));
-        let prompt = build_agent_prompt(
-            node_path,
-            &dir,
-            &wt_tasks_root,
-            system_prompt.as_deref(),
-            &nnn_s,
-            plan.budget_sec,
-        );
-        let mut outcome = None;
+    let wt_tasks_root = worktree.join(&tasks_root_rel);
+    let system_prompt = config
+        .get("system_prompt")
+        .and_then(serde_json::Value::as_str)
+        .map(|rel| worktree.join(rel));
+
+    // Одна фаза = один виклик виконавця з каскадом і watchdog. Етапи 1 і 2
+    // (graph.md, «Два етапи виконання») — два виклики в межах одного
+    // run/claim/worktree, тому тіло спільне.
+    let mut run_phase = |prompt: &str| -> Result<Option<WatchedOutcome>, String> {
         for cli in cascade_order(&plan.agent_cli, &cli_env.cloud_agent_clis) {
             let model = resolve_model_for_cli(cli_env, &cli, &plan.model_tier);
-            let Some((prog, args)) = build_agent_cli_argv(&cli, model.as_deref(), &prompt) else {
+            let Some((prog, args)) = build_agent_cli_argv(&cli, model.as_deref(), prompt) else {
                 continue; // невідоме ім'я у каскаді — пропускаємо
             };
             let mut cmd = Command::new(prog);
@@ -889,12 +948,54 @@ pub fn run_node_env(
             // Watchdog-kill — термінальний; rate-limit → наступний кандидат.
             if w.kill_reason.is_some() || !is_rate_limited(w.exit_ok, &w.combined) {
                 used_agent_cli = Some(cli);
-                outcome = Some(w);
-                break;
+                return Ok(Some(w));
             }
         }
-        outcome // None — усі CLI каскаду вичерпали ліміти підписки
+        Ok(None) // усі CLI каскаду вичерпали ліміти підписки
     };
+
+    // ── Етап 1: планування ──────────────────────────────────────────────
+    // Inline-фаза: агент спершу вирішує, вузол атомарний чи розкладається.
+    // Пропускається, коли рішення вже є — людський `hint: atomic` або
+    // наявний план (зокрема від явного `mt plan`).
+    let plan_nnn_before = crate::max_nnn(&dir, "plan_", ".md");
+    let run_task_fm = fs::read_to_string(dir.join("task.md"))
+        .map(|c| parse_front_matter(&c))
+        .unwrap_or_else(|_| serde_json::json!({}));
+    if needs_planning(&dir, &run_task_fm) {
+        let planning_prompt = build_plan_prompt(
+            node_path,
+            &dir,
+            &wt_tasks_root,
+            system_prompt.as_deref(),
+            plan_nnn_before + 1,
+        );
+        run_phase(&planning_prompt)?;
+    }
+    // Composite-план завершує run: далі — людський гейт plan-review, а не
+    // виконання. Порожній результат Етапу 1 читається як неявний atomic —
+    // план є підмогою, а не перепусткою до роботи.
+    let decomposed = latest_plan_decision(&dir).as_deref() == Some("composite");
+
+    // ── Етап 2: виконання ───────────────────────────────────────────────
+    let watched: Option<WatchedOutcome> = if decomposed {
+        None
+    } else {
+        let prompt = build_agent_prompt(
+            node_path,
+            &dir,
+            &wt_tasks_root,
+            system_prompt.as_deref(),
+            &nnn_s,
+            plan.budget_sec,
+        );
+        run_phase(&prompt)?
+    };
+    // Динамічна декомпозиція під час Етапу 2: агент дописав новий composite-
+    // план замість fact-у (graph.md, «Протокол spawn»).
+    let decomposed = decomposed
+        || (crate::max_nnn(&dir, "plan_", ".md") > plan_nnn_before
+            && latest_plan_decision(&dir).as_deref() == Some("composite"));
 
     let wall_sec = started.elapsed().as_secs();
     let cli_fm = used_agent_cli
@@ -907,7 +1008,18 @@ pub fn run_node_env(
     let kill_reason = watched.as_ref().and_then(|w| w.kill_reason);
 
     let has_fact = dir.join(&fact_file).is_file();
-    let (result, run_file, out_fact_file, propagated) = if kill_reason.is_none() && has_fact {
+    let (result, run_file, out_fact_file, propagated) = if decomposed {
+        // Lifecycle-результат: спроби не було, тому failed_streak не рухається
+        // (graph.md, таблиця категорій). Вузол іде на людський гейт.
+        let nnn_plan = crate::max_nnn(&dir, "plan_", ".md");
+        let sections = format!(
+            "\n## Completed\n\nЕтап 1: задачу визнано складеною, план `plan_{nnn_plan:03}.md`\n\n\
+             ## Blockers\n\nнемає — потрібен людський апрув плану\n\n\
+             ## Next Attempt\n\n`mt spawn --approve` матеріалізує дітей\n"
+        );
+        let run_file = write_run_fm(&dir, &nnn_s, "agent", "decomposed", &sections, &extra_fm)?;
+        ("decomposed".to_string(), run_file, None, Vec::new())
+    } else if kill_reason.is_none() && has_fact {
         let policy_required = fs::read_to_string(dir.join("task.md"))
             .map(|c| parse_front_matter(&c))
             .ok()
@@ -1062,7 +1174,9 @@ mod tests {
     use super::*;
     use crate::test_support::TestRepo;
 
-    const TASK: &str = "---\nschema_version: 1\ncreated_at: 2026-06-06T10:00:00Z\nbudget_sec: 5\nbudget_hard_sec: 2\nprogress_timeout_sec: 60\n---\n\n## Task\n\nx\n";
+    // `hint: atomic` — ці тести про Етап 2; рішення atomic уже ухвалене, тож
+    // Етап 1 свідомо не запускається (див. `needs_planning`).
+    const TASK: &str = "---\nschema_version: 1\ncreated_at: 2026-06-06T10:00:00Z\nbudget_sec: 5\nbudget_hard_sec: 2\nprogress_timeout_sec: 60\nhint: atomic\n---\n\n## Task\n\nx\n";
 
     const FLAG: &str = "---\nschema_version: 1\nmodel_tier: AVG\n---\n";
 
@@ -1156,6 +1270,98 @@ mod tests {
         // Коротша драбина — останній щабель повторюється, без ескалації тиру.
         assert_eq!(plan.retry_strategy, "diagnose-first");
         assert_eq!(plan.model_tier, "AVG");
+    }
+
+    // ── Етап 1: планування (graph.md, «Два етапи виконання») ──
+
+    #[test]
+    fn planning_runs_only_when_decision_is_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("solo");
+        fs::create_dir_all(&dir).unwrap();
+        let no_hint = serde_json::json!({});
+        assert!(needs_planning(&dir, &no_hint), "рішення ще немає");
+
+        // Людський hint — рішення вже ухвалене, зайвий виклик моделі не потрібен.
+        assert!(!needs_planning(&dir, &serde_json::json!({"hint": "atomic"})));
+        // composite-hint планування не скасовує: склад підзадач ще треба вигадати.
+        assert!(needs_planning(&dir, &serde_json::json!({"hint": "composite"})));
+
+        // Наявний план (напр. від явного `mt plan`) теж закриває питання.
+        fs::write(dir.join("plan_001.md"), "---\ndecision: atomic\n---\n").unwrap();
+        assert!(!needs_planning(&dir, &no_hint));
+    }
+
+    #[test]
+    fn latest_plan_decision_reads_highest_nnn() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("solo");
+        fs::create_dir_all(&dir).unwrap();
+        assert!(latest_plan_decision(&dir).is_none());
+
+        fs::write(dir.join("plan_001.md"), "---\ndecision: atomic\n---\n").unwrap();
+        assert_eq!(latest_plan_decision(&dir).as_deref(), Some("atomic"));
+        // Динамічна декомпозиція дописує наступний NNN — читається саме він.
+        fs::write(dir.join("plan_002.md"), "---\ndecision: Composite\n---\n").unwrap();
+        assert_eq!(latest_plan_decision(&dir).as_deref(), Some("composite"));
+    }
+
+    #[test]
+    fn plan_prompt_demands_a_decision_and_forbids_execution() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("solo");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("task.md"), TASK).unwrap();
+        let p = build_plan_prompt("solo", &dir, tmp.path(), None, 1);
+
+        assert!(p.contains("Етап 1"));
+        assert!(p.contains("plan_001.md"));
+        assert!(p.contains("decision: atomic"));
+        assert!(p.contains("composite"));
+        assert!(p.contains("mode"), "mode обов'язковий для кожної дитини");
+        assert!(p.contains("Нічого більше на цьому етапі не роби"));
+        // Це не промпт виконання: fact на цьому етапі не просять.
+        assert!(!p.contains("Обов'язковий фінальний крок"));
+    }
+
+    #[test]
+    fn composite_plan_ends_run_as_decomposed() {
+        // Наскрізно: виконавець на Етапі 1 пише composite-план → run
+        // завершується lifecycle-результатом, вузол іде на plan-review.
+        let repo = TestRepo::new();
+        let root = repo.work.path().join("mt");
+        let dir = root.join("solo");
+        fs::create_dir_all(&dir).unwrap();
+        // Без hint — Етап 1 запускається.
+        fs::write(
+            dir.join("task.md"),
+            "---\nschema_version: 1\ncreated_at: 2026-06-06T10:00:00Z\nbudget_sec: 5\nbudget_hard_sec: 2\nprogress_timeout_sec: 60\n---\n\n## Task\n\nx\n",
+        )
+        .unwrap();
+        fs::write(dir.join("a.md"), FLAG).unwrap();
+        crate::test_support::commit_all(repo.work.path(), "add solo");
+        crate::test_support::push_head(repo.work.path(), "refs/heads/main");
+
+        let r = root.to_string_lossy().into_owned();
+        const WRITES_COMPOSITE_PLAN: &str =
+            r#"printf -- '---\nschema_version: 1\ndecision: composite\n---\n\n## Children\n\nchildren\n' > plan_001.md"#;
+        with_path_shims(&[("claude", WRITES_COMPOSITE_PLAN)], || {
+            let out = run_node_env(&r, "solo", &env_default()).unwrap();
+            assert_eq!(out.result, "decomposed");
+            assert!(out.fact_file.is_none(), "fact на цьому шляху не пишеться");
+        });
+
+        let run = fs::read_to_string(root.join("solo/run_001.md")).unwrap();
+        assert!(run.contains("result: decomposed"));
+        assert!(run.contains("plan-review") || run.contains("spawn --approve"));
+        // Lifecycle-результат: серія провалів не рухається (graph.md).
+        assert_eq!(
+            crate::scan_tasks(r.clone(), vec![])
+                .unwrap()
+                .first()
+                .map(|n| n.state.clone()),
+            Some(crate::TaskState::PlanReview)
+        );
     }
 
     // ── контекст агента (graph.md, «Контекст агента») ──
