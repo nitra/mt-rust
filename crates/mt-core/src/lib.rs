@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 pub mod artifacts;
+pub mod audit;
 pub mod claims;
 pub mod config;
 pub mod directory;

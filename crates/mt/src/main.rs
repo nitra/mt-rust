@@ -44,6 +44,12 @@ enum Command {
     Audit(commands::signal::AuditArgs),
     /// Сигнал провалу.
     Failed(commands::signal::FailedArgs),
+    /// Вердикт аудитора: закриває цикл (`audit-result_NNN.md`).
+    Verdict(commands::audit::VerdictArgs),
+    /// Запит уточнення від аудитора — не вердикт, цикл лишається відкритим.
+    Clarify(commands::audit::ClarifyArgs),
+    /// Відповідь виконавця на уточнення аудитора.
+    Amend(commands::audit::AmendArgs),
     /// Запустити вузол (claim → worktree → виконавець → publish).
     Run(commands::run::RunArgs),
     /// Один прохід автопілота по всіх waiting agent-вузлах.
@@ -83,6 +89,9 @@ fn main() {
         Command::Done(args) => commands::signal::run_done(args, json),
         Command::Audit(args) => commands::signal::run_audit(args, json),
         Command::Failed(args) => commands::signal::run_failed(args, json),
+        Command::Verdict(args) => commands::audit::run_verdict(args, json),
+        Command::Clarify(args) => commands::audit::run_clarify(args, json),
+        Command::Amend(args) => commands::audit::run_amend(args, json),
         Command::Run(args) => commands::run::run(args, json),
         Command::Auto(args) => commands::run::auto(args, json),
         Command::Kill(args) => commands::lifecycle::run_kill(args, json),
