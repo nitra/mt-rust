@@ -953,6 +953,76 @@ fn read_agent_retry_max(project_root: &Path) -> u64 {
 ///
 /// `worktrees` — імена активних git-worktree (останній компонент шляху). Вузол, чий
 /// sanitized-шлях є префіксом імені активного worktree, отримує стан `running`.
+/// Накладає remote claim-и на derived-стани (graph.md): активний claim →
+/// `running`, прострочений із grace → `stalled`.
+///
+/// Локальний скан бачить лише `running_*`-маркер **своєї** машини, тому без
+/// цього накладання вузол, який виконує інший хост, виглядав би вільним —
+/// і оркестратор спробував би взяти його в роботу, щоб програти CAS.
+///
+/// Пріоритет станів зі спеки — `pending-audit`, `resolved` і `unresolvable`
+/// стоять вище за `stalled` і `running`, тому claim їх не перекриває.
+pub fn apply_remote_claims(
+    nodes: &mut [TaskNode],
+    tasks_root_rel: &str,
+    claims: &HashMap<String, bool>,
+) {
+    for node in nodes.iter_mut() {
+        let terminal = matches!(
+            node.state,
+            TaskState::PendingAudit | TaskState::Resolved | TaskState::Unresolvable
+        );
+        if !terminal {
+            let hash = claims::node_hash(tasks_root_rel, &node.path);
+            if let Some(expired) = claims.get(&hash) {
+                node.state = if *expired {
+                    TaskState::Stalled
+                } else {
+                    TaskState::Running
+                };
+            }
+        }
+        if !node.children.is_empty() {
+            apply_remote_claims(&mut node.children, tasks_root_rel, claims);
+        }
+    }
+}
+
+/// [`scan_tasks`] + накладання remote claim-ів.
+///
+/// Fail-open: немає git-репозиторію чи remote — повертається локальний скан.
+/// Видимість чужої роботи корисна, але не має робити `mt status` непридатним
+/// офлайн.
+pub fn scan_tasks_with_claims(
+    tasks_dir: String,
+    worktrees: Vec<String>,
+) -> Result<Vec<TaskNode>, String> {
+    let mut nodes = scan_tasks(tasks_dir.clone(), worktrees)?;
+    let dir = PathBuf::from(&tasks_dir);
+    let Ok(repo_root) = claims::discover_repo_root(&dir) else {
+        return Ok(nodes);
+    };
+    let Ok(tasks_root_rel) = claims::tasks_root_relative(&repo_root, &dir) else {
+        return Ok(nodes);
+    };
+    let config = config::merge_config(
+        fs::read_to_string(repo_root.join(".mt.json")).ok().as_deref(),
+    );
+    let grace = config
+        .get("claim_grace_sec")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(60);
+    let Ok(remote) = claims::fetch_remote_claims(&repo_root, grace) else {
+        return Ok(nodes);
+    };
+    let map: HashMap<String, bool> = remote
+        .into_iter()
+        .map(|c| (c.node_hash, c.expired))
+        .collect();
+    apply_remote_claims(&mut nodes, &tasks_root_rel, &map);
+    Ok(nodes)
+}
+
 pub fn scan_tasks(tasks_dir: String, worktrees: Vec<String>) -> Result<Vec<TaskNode>, String> {
     let dir = PathBuf::from(&tasks_dir);
     if !dir.exists() {
@@ -1615,6 +1685,86 @@ mod tests {
             ("run_005.md", "---\nresult: failed\n---\n"),
         ];
         assert_eq!(state_of("task", &files, &[], None), TaskState::Failed);
+    }
+
+    // ── remote claims → running / stalled ──
+
+    fn tree_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Vec<TaskNode>) {
+        let root = tempdir().unwrap();
+        let tasks_root = root.path().join("mt");
+        let dir = tasks_root.join("solo");
+        fs::create_dir_all(&dir).unwrap();
+        for (name, content) in files {
+            fs::write(dir.join(name), content).unwrap();
+        }
+        let nodes = scan_tasks(tasks_root.to_string_lossy().into_owned(), vec![]).unwrap();
+        (root, nodes)
+    }
+
+    #[test]
+    fn active_remote_claim_shows_node_as_running() {
+        let (_root, mut nodes) = tree_with(&[
+            ("task.md", "---\nschema_version: 1\n---\n"),
+            ("a.md", "---\nschema_version: 1\n---\n"),
+        ]);
+        assert_eq!(nodes[0].state, TaskState::Waiting, "локально — вільний");
+
+        let hash = claims::node_hash("mt", "solo");
+        let map = HashMap::from([(hash, false)]);
+        apply_remote_claims(&mut nodes, "mt", &map);
+        // Вузол виконує інший хост — оркестратор не має його чіпати.
+        assert_eq!(nodes[0].state, TaskState::Running);
+    }
+
+    #[test]
+    fn expired_remote_claim_shows_node_as_stalled() {
+        let (_root, mut nodes) = tree_with(&[
+            ("task.md", "---\nschema_version: 1\n---\n"),
+            ("a.md", "---\nschema_version: 1\n---\n"),
+        ]);
+        let map = HashMap::from([(claims::node_hash("mt", "solo"), true)]);
+        apply_remote_claims(&mut nodes, "mt", &map);
+        assert_eq!(nodes[0].state, TaskState::Stalled);
+    }
+
+    #[test]
+    fn remote_claim_does_not_override_terminal_states() {
+        // Пріоритет зі спеки: resolved / unresolvable / pending-audit вище
+        // за running і stalled — інакше протухлий claim «воскрешав» би
+        // завершений вузол.
+        for (files, expected) in [
+            (
+                vec![
+                    ("task.md", "---\nschema_version: 1\n---\n"),
+                    ("a.md", "---\nschema_version: 1\n---\n"),
+                    ("fact_001.md", ""),
+                ],
+                TaskState::Resolved,
+            ),
+            (
+                vec![
+                    ("task.md", "---\nschema_version: 1\n---\n"),
+                    ("a.md", "---\nschema_version: 1\n---\n"),
+                    ("unresolvable.md", "---\nschema_version: 1\n---\n"),
+                ],
+                TaskState::Unresolvable,
+            ),
+        ] {
+            let (_root, mut nodes) = tree_with(&files);
+            let map = HashMap::from([(claims::node_hash("mt", "solo"), true)]);
+            apply_remote_claims(&mut nodes, "mt", &map);
+            assert_eq!(nodes[0].state, expected);
+        }
+    }
+
+    #[test]
+    fn nodes_without_claims_keep_local_state() {
+        let (_root, mut nodes) = tree_with(&[
+            ("task.md", "---\nschema_version: 1\n---\n"),
+            ("a.md", "---\nschema_version: 1\n---\n"),
+        ]);
+        apply_remote_claims(&mut nodes, "mt", &HashMap::new());
+        assert_eq!(nodes[0].state, TaskState::Waiting);
     }
 
     // ── три тригери unresolvable (graph.md) ──

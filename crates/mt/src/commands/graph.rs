@@ -2,7 +2,7 @@
 
 use clap::Args;
 use mt_core::ledger::build_cost_ledger;
-use mt_core::{discover_worktrees, scan_tasks, TaskNode};
+use mt_core::{discover_worktrees, TaskNode};
 
 use crate::context::resolve_tasks_dir;
 use crate::output::emit;
@@ -26,9 +26,12 @@ fn find_node<'a>(nodes: &'a [TaskNode], path: &str) -> Option<&'a TaskNode> {
     None
 }
 
+/// Скан із накладанням remote claim-ів: `mt status` має показувати, що
+/// вузол зайнятий іншим хостом (`running`) або що його claim протух
+/// (`stalled`), а не лише стан цієї машини.
 fn scan_tree(tasks_dir: &str) -> Result<Vec<TaskNode>, String> {
     let worktrees = discover_worktrees(std::path::Path::new(tasks_dir));
-    scan_tasks(tasks_dir.to_string(), worktrees)
+    mt_core::scan_tasks_with_claims(tasks_dir.to_string(), worktrees)
 }
 
 #[derive(Args)]
