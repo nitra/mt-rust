@@ -18,6 +18,131 @@ use chrono::Utc;
 
 use crate::validate_name;
 
+/// `mt stop` — зупиняє виконання вузла й нащадків (graph.md, «Протокол
+/// патчу вузла»: `mt stop` наступників **від листів**, далі `invalidate`).
+///
+/// Порядок від листів принциповий: зупинений батько інакше встиг би
+/// підхопити ще живого нащадка як завершеного. Знімається локальний
+/// running-маркер; claim лишається протухати за lease — забирати чужий
+/// claim силою тут не можна, це зробить takeover за штатними правилами.
+///
+/// Повертає шляхи вузлів, з яких маркер справді знято.
+pub fn stop(tasks_dir: &str, node_path: &str) -> Result<Vec<String>, String> {
+    validate_name(node_path)?;
+    let dir = Path::new(tasks_dir).join(node_path);
+    if !dir.join("task.md").is_file() {
+        return Err(format!("node not found: {node_path}"));
+    }
+    let mut stopped = Vec::new();
+    stop_rec(&dir, node_path, &mut stopped)?;
+    Ok(stopped)
+}
+
+fn stop_rec(dir: &Path, node_path: &str, stopped: &mut Vec<String>) -> Result<(), String> {
+    // Спершу нащадки — від листів угору.
+    for child in crate::lifecycle::child_nodes(dir) {
+        let child_path = format!("{node_path}/{child}");
+        stop_rec(&dir.join(&child), &child_path, stopped)?;
+    }
+    let mut removed = false;
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("running_") {
+            fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
+            removed = true;
+        }
+    }
+    if removed {
+        stopped.push(node_path.to_string());
+    }
+    Ok(())
+}
+
+/// Порівняння hash нового fact із заархівованим (graph.md, «Протокол патчу
+/// вузла»): після re-run інвалідованого вузла — **однаковий → нащадки
+/// розблоковуються; різний → cascade invalidate вниз**.
+///
+/// Сенс: інвалідація батька не мусить коштувати перевиконання всього
+/// піддерева. Якщо повторний прогін дав той самий результат, робота
+/// нащадків лишається чинною; змінився — їхні входи застаріли.
+///
+/// Повертає список каскадно інвалідованих нащадків (порожній — результат
+/// збігся або порівнювати нема з чим).
+pub fn reconcile_after_rerun(tasks_dir: &str, node_path: &str) -> Result<Vec<String>, String> {
+    validate_name(node_path)?;
+    let dir = Path::new(tasks_dir).join(node_path);
+    let nnn = crate::accepted_fact_nnn(&dir);
+    if nnn == 0 {
+        return Ok(Vec::new()); // ще немає прийнятого результату
+    }
+    let Some(previous) = latest_archived_fact(&dir) else {
+        return Ok(Vec::new()); // вузол не інвалідували — нема з чим звіряти
+    };
+    let current = fs::read_to_string(dir.join(format!("fact_{nnn:03}.md")))
+        .map_err(|e| e.to_string())?;
+    if fact_digest(&current) == fact_digest(&previous) {
+        return Ok(Vec::new()); // результат той самий — нащадки чинні
+    }
+
+    let mut cascaded = Vec::new();
+    let ts = timestamp();
+    for child in child_nodes(&dir) {
+        let child_path = format!("{node_path}/{child}");
+        invalidate_rec(&dir.join(&child), &child_path, &ts, true, &mut cascaded)?;
+    }
+    if !cascaded.is_empty() {
+        let repo_root = repo_root_for(tasks_dir);
+        if let Some(root) = &repo_root {
+            let after = snapshot(root, &dir);
+            // `before` тут — стан після каскаду плюс архіви; публікуємо
+            // поточний зріз піддерева цілком.
+            publish_mutation(
+                tasks_dir,
+                &BTreeSet::new(),
+                &after,
+                &format!("mt: cascade invalidate під {node_path} (fact змінився)"),
+            )?;
+        }
+    }
+    Ok(cascaded)
+}
+
+/// Тіло fact-у без frontmatter — порівнюємо зміст результату, а не
+/// час створення чи актора, які змінюються щоразу.
+fn fact_digest(content: &str) -> String {
+    crate::frontmatter::get_body(content).trim().to_string()
+}
+
+/// Найсвіжіший заархівований `fact_*` із `history/*-invalidate/`.
+fn latest_archived_fact(dir: &Path) -> Option<String> {
+    let history = dir.join("history");
+    let mut archives: Vec<PathBuf> = fs::read_dir(&history)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_dir()
+                && p.file_name()
+                    .map(|n| n.to_string_lossy().ends_with("-invalidate"))
+                    .unwrap_or(false)
+        })
+        .collect();
+    archives.sort();
+    let archive = archives.last()?;
+    let mut facts: Vec<PathBuf> = fs::read_dir(archive)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .map(|n| n.to_string_lossy().starts_with("fact_"))
+                .unwrap_or(false)
+        })
+        .collect();
+    facts.sort();
+    fs::read_to_string(facts.last()?).ok()
+}
+
 /// Знімок файлів піддерева шляхами відносно кореня репо. Відсутня
 /// директорія — порожній знімок (kill лишає саме такий стан).
 fn snapshot(repo_root: &Path, dir: &Path) -> BTreeSet<String> {
@@ -283,6 +408,85 @@ pub fn kill(tasks_dir: &str, node_path: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── mt stop і звірка після re-run ──
+
+    #[test]
+    fn stop_clears_markers_from_leaves_up() {
+        let tmp = fixture();
+        let root = tmp.path().to_string_lossy().into_owned();
+        let node = tmp.path().join("research");
+        fs::write(node.join("running_1_until_9999999999"), "").unwrap();
+        fs::write(node.join("analyze/running_2_until_9999999999"), "").unwrap();
+
+        let stopped = stop(&root, "research").unwrap();
+        // Порядок від листів: дитина перед батьком.
+        assert_eq!(stopped, ["research/analyze", "research"]);
+        assert!(!crate::has_running_marker(&node));
+        assert!(!crate::has_running_marker(&node.join("analyze")));
+    }
+
+    #[test]
+    fn stop_is_quiet_when_nothing_runs() {
+        let tmp = fixture();
+        let root = tmp.path().to_string_lossy().into_owned();
+        assert!(stop(&root, "research").unwrap().is_empty());
+    }
+
+    #[test]
+    fn same_fact_after_rerun_keeps_descendants() {
+        let tmp = fixture();
+        let root = tmp.path().to_string_lossy().into_owned();
+        let node = tmp.path().join("research");
+        let fact = "---\nschema_version: 1\n---\n\n## Summary\n\nті самі 42 рядки\n";
+        fs::write(node.join("fact_001.md"), fact).unwrap();
+
+        invalidate(&root, "research", false).unwrap();
+        // Повторний прогін дав той самий зміст (інший created_at — не рахується).
+        fs::write(
+            node.join("fact_001.md"),
+            "---\nschema_version: 1\ncreated_at: 2026-08-10T00:00:00Z\n---\n\n## Summary\n\nті самі 42 рядки\n",
+        )
+        .unwrap();
+
+        assert!(
+            reconcile_after_rerun(&root, "research").unwrap().is_empty(),
+            "нащадків не чіпаємо — їхні входи не змінились"
+        );
+        assert!(node.join("analyze/fact_001.md").is_file());
+    }
+
+    #[test]
+    fn changed_fact_after_rerun_cascades_down() {
+        let tmp = fixture();
+        let root = tmp.path().to_string_lossy().into_owned();
+        let node = tmp.path().join("research");
+        fs::write(
+            node.join("fact_001.md"),
+            "---\n---\n\n## Summary\n\nстарий результат\n",
+        )
+        .unwrap();
+
+        invalidate(&root, "research", false).unwrap();
+        fs::write(
+            node.join("fact_001.md"),
+            "---\n---\n\n## Summary\n\nНОВИЙ результат\n",
+        )
+        .unwrap();
+
+        let cascaded = reconcile_after_rerun(&root, "research").unwrap();
+        assert_eq!(cascaded, ["research/analyze"]);
+        // Chain нащадка заархівовано — його входи застаріли.
+        assert!(!node.join("analyze/fact_001.md").is_file());
+    }
+
+    #[test]
+    fn reconcile_is_noop_without_invalidation_history() {
+        let tmp = fixture();
+        let root = tmp.path().to_string_lossy().into_owned();
+        // Вузол не інвалідували — звіряти нема з чим.
+        assert!(reconcile_after_rerun(&root, "research").unwrap().is_empty());
+    }
 
     // ── git-протокол (graph.md, «Протокол патчу вузла») ──
 

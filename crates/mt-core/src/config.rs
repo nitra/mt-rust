@@ -29,6 +29,8 @@ pub fn config_defaults() -> Value {
         // (graph.md їх називає, значень не задає).
         "engineer_retry_max": 1,
         "plan_reject_max": 3,
+        // Поріг другого шару стискання невдач — теж вибір реалізації.
+        "run_summary_threshold": 3,
         "agent_concurrency": 5,
         "claim_lease_sec": 3600,
         "claim_grace_sec": 60,

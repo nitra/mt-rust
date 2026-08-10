@@ -16,7 +16,7 @@
 
 | Мілстоун | Стан | Головне, чого бракує |
 | --- | --- | --- |
-| M0 — dogfood ядра | значною мірою | Stage 1 (inline-планування), контекст агента, аудит-цикл, EngineerAgent, `unresolvable`, recurrence, git-протокол lifecycle-операцій |
+| M0 — dogfood ядра | цикл замкнено | recurrence; secrets broker; телеметрія вартості |
 | M1 — agent-server | значною мірою | orchestrator-роль і wake, backpressure за спекою, глибокий реплей, злиття `agent-cli` у `mt serve\|attach` |
 | M2 — mission control | частково | матеріалізація підпису в `## Approvals`, персистентний store і auth, реальний push-транспорт, handoff між машинами через relay, presence |
 | M3 — dashboard і поверхні | не починався | surface-профілі, MCP-сервери, preview/`ContextSelected`, `client_kind: mt-dashboard` |
@@ -41,16 +41,16 @@
 | Retry ladder + каскад CLI | РЕАЛІЗОВАНО | `runner.rs` | Телеметрія `tokens_in/out`/`cost_usd` не збирається |
 | Stage 1 — inline-планування | РЕАЛІЗОВАНО | `runner.rs` `needs_planning`/`build_plan_prompt`/`latest_plan_decision` | — (Етап 1 пропускається за `hint: atomic` або наявного плану; порожній результат читається як неявний atomic) |
 | Контекст агента (system-prompt, deps, plan, prior attempts) | РЕАЛІЗОВАНО | `runner.rs` `build_agent_prompt`/`dep_facts`/`prior_attempts` | — (другий шар стискання читає `run-summary.md`, якщо він є; генератора самого файлу ще немає — окремий рядок) |
-| `run-summary.md` | ВІДСУТНЄ | — | Генератора немає |
+| `run-summary.md` (другий шар стискання) | РЕАЛІЗОВАНО | `runner.rs` (генерація за `run_summary_threshold`), читач — `build_agent_prompt` | — |
 | Сигнали `done`/`audit`/`failed`, `## Check` | РЕАЛІЗОВАНО | `signal.rs` | — |
 | Composite-агрегація вгору | РЕАЛІЗОВАНО | `signal.rs` `propagate_composite` | — |
 | Протокол spawn | РЕАЛІЗОВАНО | `spawn.rs` `spawn_approve`/`publish_spawn`, `publish.rs` `publish_lifecycle` | — (`plan_reject_max` закрито через `unresolvable`) |
-| Git-протокол `invalidate`/`kill` | ЧАСТКОВО | `lifecycle.rs` `publish_mutation` | Транспорт закрито (atomic commit різниці станів). Лишається семантика re-run: порівняння hash нового fact (однаковий → нащадки розблоковуються, різний → cascade) і поглинання running-вузлів (`mt stop`) |
+| Git-протокол `invalidate`/`kill` + re-run семантика | РЕАЛІЗОВАНО | `lifecycle.rs` `publish_mutation`/`stop`/`reconcile_after_rerun`; CLI — `mt stop` | — |
 | Оркестрація `run --auto` | ЧАСТКОВО | `orchestrate.rs` | Батчинг замість continuous backfill; немає periodic rescan, remote claims, wake |
 | Worktree lifecycle | РЕАЛІЗОВАНО | `worktree.rs` | — |
 | Git-межа (`gix` + вузький shim) | РЕАЛІЗОВАНО | `git/` | — |
 | Аудит-цикл: вердикт, clarification, amend, `audit_failed_streak` | РЕАЛІЗОВАНО | `audit.rs`; CLI — `mt verdict`/`mt clarify`/`mt amend` | — |
-| Аудитор як актор (`mt run --actor auditor`, `audit_model`) | ВІДСУТНЄ | — | Вердикт наразі виносить людина або зовнішній агент через CLI; автоматичного аудитора і тригерів `audit_schedule_days`/`audit_on_patch` немає |
+| Аудитор як актор (`mt run --actor auditor`, `audit_model`) | ЧАСТКОВО | `audit.rs` `run_auditor`/`build_auditor_prompt`; `runner.rs` `run_single_phase` | Тригери `audit_schedule_days`/`audit_on_patch` — потребують orchestrator-ролі (хвиля 3) |
 | EngineerAgent | РЕАЛІЗОВАНО | `runner.rs` `Actor`/`build_engineer_prompt`/`full_run_history`; CLI — `mt run --actor engineer` | — (GraphPatch реалізовано як дозволені втручання через штатні команди, окремого артефакту спека не задає) |
 | `unresolvable` (3 тригери + алерт) | ЧАСТКОВО | `lib.rs` `unresolvable_reason`/`write_unresolvable`; тригери — `runner.rs` (перед комітом), `spawn.rs` `spawn_reject` | Алерт власнику (relay push) — потребує orchestrator-ролі й relay-шляху (хвиля 3) |
 | Recurrence | ВІДСУТНЄ | — | Уся глава `recurrence.md` |
@@ -109,7 +109,7 @@
 Порядок обраний так, щоб кожна наступна хвиля спиралась на замкнений інваріант попередньої, а не на обіцянку.
 
 1. **Контрактний борг — ✅ закрито.** `failed_streak` (категорія + межа), формат `a.md`/`h.md`, видалення `mt-napi`, `schema_version` fail-closed, гейт immutability, дефолти `.mt.json`, `orphan-node`, матеріалізація `result: merge-conflict`.
-2. **Замкнути M0 як автономний цикл.** Лишилось: генератор `run-summary.md`, аудитор як актор, git-протокол `invalidate`/`kill` — транспорт (лишається hash-порівняння після re-run і `mt stop`). **Закрито:** `unresolvable` з трьома тригерами (крім алерту — потребує relay-шляху хвилі 3), контекст агента, git-протокол spawn і invalidate/kill, аудит-цикл, Stage 1, EngineerAgent. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах.
+2. **Замкнути M0 як автономний цикл — ✅ закрито.** `unresolvable` з трьома тригерами, контекст агента, `run-summary.md`, git-протокол `spawn`/`invalidate`/`kill` з re-run семантикою і `mt stop`, аудит-цикл разом із агентом-аудитором, Stage 1, EngineerAgent. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах. Хвости, що належать orchestrator-ролі хвилі 3: алерт при `unresolvable` і тригери аудиту за розкладом (`audit_schedule_days`/`audit_on_patch`).
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
 4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store, auth, push-транспорт, `HandoffRequest` через relay, presence.
 5. **M6 фаза 0 — модельний трек Дельти.** Паралельно від хвилі 2, як велить roadmap: `mandates.yaml` (включно з `kind: model` і `audacity`), `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision`, квіз-гейт, конверсія вичерпаної драбини в розвилку. Соціальних ризиків нема — механіка обкатується на моделях.

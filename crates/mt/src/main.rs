@@ -44,6 +44,8 @@ enum Command {
     Audit(commands::signal::AuditArgs),
     /// Сигнал провалу.
     Failed(commands::signal::FailedArgs),
+    /// Зупинити виконання піддерева (running-маркери, від листів).
+    Stop(commands::lifecycle::StopArgs),
     /// Вердикт аудитора: закриває цикл (`audit-result_NNN.md`).
     Verdict(commands::audit::VerdictArgs),
     /// Запит уточнення від аудитора — не вердикт, цикл лишається відкритим.
@@ -89,6 +91,7 @@ fn main() {
         Command::Done(args) => commands::signal::run_done(args, json),
         Command::Audit(args) => commands::signal::run_audit(args, json),
         Command::Failed(args) => commands::signal::run_failed(args, json),
+        Command::Stop(args) => commands::lifecycle::run_stop(args, json),
         Command::Verdict(args) => commands::audit::run_verdict(args, json),
         Command::Clarify(args) => commands::audit::run_clarify(args, json),
         Command::Amend(args) => commands::audit::run_amend(args, json),
