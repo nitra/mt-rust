@@ -384,6 +384,42 @@ fn prior_attempts(node_dir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Один виклик виконавця в директорії вузла — без claim, worktree й
+/// watchdog-політик вузла. Для акторів, що не виконують задачу, а лише
+/// читають її й пишуть один артефакт (аудитор).
+///
+/// Повертає CLI, який спрацював, або `None`, якщо весь каскад упоровся в
+/// ліміти підписки.
+pub fn run_single_phase(
+    dir: &Path,
+    cli_env: &AgentCliEnv,
+    model_tier: &str,
+    prompt: &str,
+) -> Result<Option<String>, String> {
+    for cli in cascade_order(&cli_env.agent_cli, &cli_env.cloud_agent_clis) {
+        let model = resolve_model_for_cli(cli_env, &cli, model_tier);
+        let Some((prog, args)) = build_agent_cli_argv(&cli, model.as_deref(), prompt) else {
+            continue;
+        };
+        let out = Command::new(prog)
+            .args(args)
+            .current_dir(dir)
+            .env("MT_MODEL_TIER", model_tier)
+            .env("MT_AGENT_CLI", &cli)
+            .output()
+            .map_err(|e| format!("{cli}: {e}"))?;
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        if !is_rate_limited(out.status.success(), &combined) {
+            return Ok(Some(cli));
+        }
+    }
+    Ok(None)
+}
+
 /// Хто виконує run (graph.md, `actor:` у `run_NNN.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -1062,7 +1098,9 @@ pub fn run_node_env_as(
     // Одна фаза = один виклик виконавця з каскадом і watchdog. Етапи 1 і 2
     // (graph.md, «Два етапи виконання») — два виклики в межах одного
     // run/claim/worktree, тому тіло спільне.
-    let mut run_phase = |prompt: &str| -> Result<Option<WatchedOutcome>, String> {
+    // Повертає (підсумок, який CLI спрацював) — без мутації зовнішнього
+    // стану, щоб фази можна було викликати в будь-якому порядку.
+    let run_phase = |prompt: &str| -> Result<(Option<WatchedOutcome>, Option<String>), String> {
         for cli in cascade_order(&plan.agent_cli, &cli_env.cloud_agent_clis) {
             let model = resolve_model_for_cli(cli_env, &cli, &plan.model_tier);
             let Some((prog, args)) = build_agent_cli_argv(&cli, model.as_deref(), prompt) else {
@@ -1081,11 +1119,10 @@ pub fn run_node_env_as(
             )?;
             // Watchdog-kill — термінальний; rate-limit → наступний кандидат.
             if w.kill_reason.is_some() || !is_rate_limited(w.exit_ok, &w.combined) {
-                used_agent_cli = Some(cli);
-                return Ok(Some(w));
+                return Ok((Some(w), Some(cli)));
             }
         }
-        Ok(None) // усі CLI каскаду вичерпали ліміти підписки
+        Ok((None, None)) // усі CLI каскаду вичерпали ліміти підписки
     };
 
     // ── Етап 1: планування ──────────────────────────────────────────────
@@ -1138,7 +1175,9 @@ pub fn run_node_env_as(
                 &nnn_s,
             ),
         };
-        run_phase(&prompt)?
+        let (w, cli) = run_phase(&prompt)?;
+        used_agent_cli = cli;
+        w
     };
     // Динамічна декомпозиція під час Етапу 2: агент дописав новий composite-
     // план замість fact-у (graph.md, «Протокол spawn»).
@@ -1236,6 +1275,29 @@ pub fn run_node_env_as(
     // push, що й run: інакше вузол на мить лишався б у стані «ще ретраїмо»
     // з уже вичерпаною драбиною, і наступний прохід оркестратора взяв би
     // його в роботу знову.
+    // Другий шар стискання невдач (graph.md): після `run_summary_threshold`
+    // failure-ранів wrapper замовляє LLM-резюме. Далі контекст агента бере
+    // саме його замість переліку спроб — інакше промпт росте лінійно з
+    // довжиною серії, а корисного в ньому не додається.
+    let failure_runs = crate::failed_streak(&dir);
+    let summary_threshold = fm_u64(&config, "run_summary_threshold").unwrap_or(3);
+    if failure_runs >= summary_threshold && !dir.join("run-summary.md").exists() {
+        let attempts = prior_attempts(&dir);
+        if !attempts.is_empty() {
+            let prompt = format!(
+                "## Задача\n\nСтисни історію невдалих спроб вузла `{node_path}` в одне резюме \
+                 для наступного виконавця.\n\n## Спроби\n\n{}\n\n## Що зробити\n\nЗапиши файл \
+                 `run-summary.md` у поточній директорії: що вже пробували, які гіпотези \
+                 відпали, і що лишається неперевіреним. Без переказу кожної спроби окремо — \
+                 потрібен висновок, а не журнал.",
+                attempts.join("\n\n")
+            );
+            // Невдача резюмування не валить run: це підмога наступній спробі,
+            // а не частина результату цієї.
+            let _ = run_phase(&prompt);
+        }
+    }
+
     if let Some(reason) = crate::unresolvable_reason(&dir, &config) {
         crate::write_unresolvable(&dir, &reason)?;
     }
@@ -1419,6 +1481,31 @@ mod tests {
         // Коротша драбина — останній щабель повторюється, без ескалації тиру.
         assert_eq!(plan.retry_strategy, "diagnose-first");
         assert_eq!(plan.model_tier, "AVG");
+    }
+
+    #[test]
+    fn run_summary_replaces_attempts_once_generated() {
+        // Другий шар стискання вмикається за порогом; сам генератор —
+        // LLM-виклик, тут перевіряємо ефект на контексті наступної спроби.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("solo");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("task.md"), TASK).unwrap();
+        for nnn in 1..=3 {
+            fs::write(
+                dir.join(format!("run_{nnn:03}.md")),
+                "---\nresult: failed\n---\n\n## Blockers\n\nтест X падає\n",
+            )
+            .unwrap();
+        }
+        // До резюме — перелік спроб.
+        let before = build_agent_prompt("solo", &dir, tmp.path(), None, "004", 600);
+        assert!(before.contains("Спроба 001"));
+
+        fs::write(dir.join("run-summary.md"), "Три спроби впирались у конфіг.\n").unwrap();
+        let after = build_agent_prompt("solo", &dir, tmp.path(), None, "004", 600);
+        assert!(after.contains("Три спроби впирались"));
+        assert!(!after.contains("Спроба 001"), "резюме витісняє перелік");
     }
 
     // ── EngineerAgent (graph.md, «Retry ladder, engineer, unresolvable») ──

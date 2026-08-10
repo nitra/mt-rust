@@ -18,10 +18,30 @@ pub struct RunArgs {
 pub fn run(args: RunArgs, json: bool) -> Result<(), String> {
     let tasks_dir = resolve_tasks_dir(false)?;
     let node_path = resolve_node_path(args.name, &tasks_dir)?;
+    // Аудитор — окремий шлях: без claim і worktree (він нічого не виконує).
+    if args.actor.as_deref() == Some("auditor") {
+        let run = mt_core::audit::run_auditor(
+            &tasks_dir,
+            &node_path,
+            &mt_core::config::agent_cli_env_from_process(),
+        )?;
+        emit(json, &run, |r| {
+            println!(
+                "audit {}: {}",
+                node_path,
+                r.artifact.as_deref().unwrap_or("аудитор нічого не написав")
+            );
+        });
+        return Ok(());
+    }
     let actor = match args.actor.as_deref() {
         None | Some("agent") => mt_core::runner::Actor::Agent,
         Some("engineer") => mt_core::runner::Actor::Engineer,
-        Some(other) => return Err(format!("невідомий актор `{other}` — agent | engineer")),
+        Some(other) => {
+            return Err(format!(
+                "невідомий актор `{other}` — agent | engineer | auditor"
+            ))
+        }
     };
     let outcome = mt_core::runner::run_node_as(&tasks_dir, &node_path, actor)?;
     emit(json, &outcome, |o| {

@@ -312,6 +312,107 @@ pub fn audit_escalation_due(dir: &Path, config: &serde_json::Value) -> bool {
     audit_failed_streak(dir) >= max
 }
 
+/// Результат прогону агента-аудитора.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditRun {
+    /// Що аудитор написав: `audit-result_NNN.md` або `clarification_NNN.md`.
+    pub artifact: Option<String>,
+    pub nnn: u64,
+    pub agent_cli: Option<String>,
+}
+
+/// Прогін агента-аудитора над відкритим циклом (graph.md, `mt run --actor
+/// auditor`).
+///
+/// Свідома відмінність від `run_node`: без claim і без ефемерного worktree.
+/// Аудит нічого не виконує — він читає контракт і результат та пише один
+/// артефакт, тож фенсити нема чого, а зайвий worktree лише коштував би
+/// часу на кожен вузол із `audit: required`.
+///
+/// Модель береться з `audit_model` (`.mt.json`), інакше — звичайний тир
+/// вузла: аудит зазвичай дешевший за виконання, але політика вирішує.
+pub fn run_auditor(
+    tasks_dir: &str,
+    node_path: &str,
+    cli_env: &crate::config::AgentCliEnv,
+) -> Result<AuditRun, String> {
+    let dir = node_dir(tasks_dir, node_path)?;
+    let open = open_audit(&dir).ok_or_else(|| {
+        format!("{node_path}: немає відкритого аудит-циклу — аудитувати нема чого")
+    })?;
+    if open.clarification_file.is_some() && open.amended_file.is_none() {
+        return Err(format!(
+            "{node_path}: чекає на відповідь виконавця (`mt amend`) — аудит зупинено"
+        ));
+    }
+
+    let config = crate::config::merge_config(
+        fs::read_to_string(Path::new(tasks_dir).join("../.mt.json"))
+            .ok()
+            .as_deref(),
+    );
+    let tier = config
+        .get("audit_model")
+        .and_then(serde_json::Value::as_str)
+        .map(crate::config::normalize_model_tier)
+        .unwrap_or_else(|| "AVG".to_string());
+
+    let prompt = build_auditor_prompt(node_path, &dir, open.nnn);
+    let agent_cli = crate::runner::run_single_phase(&dir, cli_env, &tier, &prompt)?;
+
+    // Вердикт/уточнення пише сам аудитор через CLI — читаємо, що вийшло.
+    let after = open_audit(&dir);
+    let artifact = match &after {
+        None => Some(format!("audit-result_{:03}.md", open.nnn)),
+        Some(state) => state.clarification_file.clone(),
+    };
+    Ok(AuditRun {
+        artifact,
+        nnn: open.nnn,
+        agent_cli,
+    })
+}
+
+/// Промпт аудитора (graph.md: аудитором може бути агент за `audit_model`).
+///
+/// Аудитор бачить контракт і результат, але **не** історію спроб: його
+/// питання — «чи відповідає fact тому, що обіцяв `## Done when`», а не
+/// «чи важко було це зробити». Знання про муки виконавця тут лише зсуває
+/// планку.
+pub fn build_auditor_prompt(node_path: &str, dir: &Path, nnn: u64) -> String {
+    let body = |name: &str| -> Option<String> {
+        let content = fs::read_to_string(dir.join(name)).ok()?;
+        let body = crate::frontmatter::get_body(&content);
+        let text = if body.trim().is_empty() { content } else { body };
+        let text = text.trim();
+        (!text.is_empty()).then(|| text.to_string())
+    };
+
+    let mut blocks = vec![format!(
+        "## Аудит вузла: {node_path}\n\nРобоча директорія: {}\nЦикл: {nnn:03}",
+        dir.display()
+    )];
+    if let Some(task) = body("task.md") {
+        blocks.push(format!("## Контракт (task.md)\n\n{task}"));
+    }
+    if let Some(fact) = body(&format!("fact_{nnn:03}.md")) {
+        blocks.push(format!("## Результат (fact_{nnn:03}.md)\n\n{fact}"));
+    }
+    if let Some(amended) = body(&format!("amended_{nnn:03}.md")) {
+        blocks.push(format!("## Відповідь на твоє уточнення\n\n{amended}"));
+    }
+    blocks.push(format!(
+        "## Що зробити\n\nЗвір результат із секцією `## Done when` контракту й ухвали рішення \
+         однією з команд у цій директорії:\n\n\
+         - `mt verdict {node_path} --success --reason \"<чому приймаєш>\"`\n\
+         - `mt verdict {node_path} --reason \"<чого бракує>\"` — відхилити на доопрацювання\n\
+         - `mt clarify {node_path} --question \"<що незрозуміло>\"` — лише якщо без відповіді \
+           рішення ухвалити неможливо; дозволено один раз за цикл\n\n\
+         Оцінюй відповідність контракту, а не складність шляху до неї."
+    ));
+    blocks.join("\n\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,6 +429,45 @@ mod tests {
         fs::write(dir.join("pending-audit_001.md"), "---\nschema_version: 1\n---\n").unwrap();
         let root = tmp.path().to_string_lossy().into_owned();
         (tmp, root)
+    }
+
+    #[test]
+    fn auditor_prompt_judges_contract_not_effort() {
+        let (tmp, _root) = node_with_open_audit();
+        let dir = tmp.path().join("solo");
+        fs::write(
+            dir.join("task.md"),
+            "---\nschema_version: 1\n---\n\n## Task\n\nx\n\n## Done when\n\nтести зелені\n",
+        )
+        .unwrap();
+        fs::write(dir.join("run_001.md"), "---\nresult: failed\n---\n\n## Blockers\n\nмучився довго\n").unwrap();
+
+        let p = build_auditor_prompt("solo", &dir, 1);
+        assert!(p.contains("Контракт (task.md)") && p.contains("тести зелені"));
+        assert!(p.contains("Результат (fact_001.md)"));
+        assert!(p.contains("mt verdict") && p.contains("mt clarify"));
+        // Історія спроб аудитору не показується — вона зсуває планку.
+        assert!(!p.contains("мучився довго"), "got: {p}");
+    }
+
+    #[test]
+    fn auditor_refuses_without_open_cycle_or_pending_answer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("solo");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("task.md"), TASK).unwrap();
+        let root = tmp.path().to_string_lossy().into_owned();
+        let env = crate::config::AgentCliEnv::default();
+        assert!(run_auditor(&root, "solo", &env)
+            .unwrap_err()
+            .contains("немає відкритого аудит-циклу"));
+
+        // Уточнення без відповіді — аудит зупинено, м'яч на боці виконавця.
+        let (_t, root2) = node_with_open_audit();
+        clarification(&root2, "solo", "auditor", "Чому?").unwrap();
+        assert!(run_auditor(&root2, "solo", &env)
+            .unwrap_err()
+            .contains("чекає на відповідь виконавця"));
     }
 
     #[test]
