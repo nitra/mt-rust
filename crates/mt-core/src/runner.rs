@@ -328,28 +328,134 @@ fn is_rate_limited(exit_ok: bool, output: &str) -> bool {
 /// dogfood 2026-07-15: gemma-2B через pi виконує пряму інструкцію, але
 /// губиться на meta-prompt). `plan_*.md` лишаються за посиланням — вони
 /// опційні і можуть бути великими.
-fn build_agent_prompt(task_path: &str, node_dir: &Path, nnn: &str, budget_sec: u64) -> String {
-    let task_body = fs::read_to_string(node_dir.join("task.md"))
-        .map(|content| {
-            let trimmed = content.trim_start();
-            match trimmed.strip_prefix("---") {
-                Some(rest) => rest
-                    .split_once("\n---")
-                    .map(|(_, body)| body.trim_start_matches('\n').to_string())
-                    .unwrap_or(content.clone()),
-                None => content.clone(),
-            }
+/// Тіло markdown-файлу без frontmatter.
+fn file_body(path: &Path) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    let body = crate::frontmatter::get_body(&content);
+    let body = if body.trim().is_empty() {
+        content
+    } else {
+        body
+    };
+    let trimmed = body.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// Найбільший NNN серед файлів `<prefix>NNN.md` разом із тілом.
+fn latest_artifact_body(dir: &Path, prefix: &str) -> Option<String> {
+    let nnn = crate::max_nnn(dir, prefix, ".md");
+    (nnn > 0).then(|| file_body(&dir.join(format!("{prefix}{nnn:03}.md"))))?
+}
+
+/// Резюме прийнятих fact-ів залежностей — те, заради чого вузол чекав на
+/// deps (graph.md, блок `[deps/]`). Порожній dep-файл — лише ребро; зміст
+/// живе у fact-і залежності, тож інлайниться саме він.
+fn dep_facts(tasks_root: &Path, node_dir: &Path) -> Vec<String> {
+    crate::read_deps_dir(node_dir)
+        .into_iter()
+        .filter_map(|dep_id| {
+            let dep_dir = tasks_root.join(&dep_id);
+            let nnn = crate::accepted_fact_nnn(&dep_dir);
+            let body = file_body(&dep_dir.join(format!("fact_{nnn:03}.md")))?;
+            Some(format!("### {dep_id}\n\n{body}"))
         })
-        .unwrap_or_default();
-    format!(
-        "You are executing task: {task_path}\nWorking directory: {}\nRun NNN: {nnn}\nBudget: {budget_sec}s\n\n\
-         The task (from task.md):\n\n{task_body}\n\n\
-         Execute the task above in the current directory (read plan_*.md if present).\n\n\
-         MANDATORY FINAL STEP: create the file fact_{nnn}.md in the current directory. \
-         Without fact_{nnn}.md the run counts as FAILED even if everything else is done. Example content:\n\n\
-         ## Summary\n\n<one sentence describing the result>",
+        .collect()
+}
+
+/// Перший шар стискання невдач (graph.md, «Prior attempts резюме»): із
+/// кожного failure-рану після останнього прийнятого fact беруться лише
+/// Completed/Blockers/Next Attempt — сирі run-файли в промпт не йдуть.
+fn prior_attempts(node_dir: &Path) -> Vec<String> {
+    let since = crate::accepted_fact_nnn(node_dir);
+    let latest = crate::max_nnn(node_dir, "run_", ".md");
+    (since + 1..=latest)
+        .filter_map(|nnn| {
+            let path = node_dir.join(format!("run_{nnn:03}.md"));
+            let content = fs::read_to_string(&path).ok()?;
+            let sections: Vec<String> = ["Completed", "Blockers", "Next Attempt"]
+                .into_iter()
+                .filter_map(|name| {
+                    md_section(&content, name).map(|body| format!("- **{name}:** {body}"))
+                })
+                .collect();
+            (!sections.is_empty())
+                .then(|| format!("### Спроба {nnn:03}\n\n{}", sections.join("\n")))
+        })
+        .collect()
+}
+
+/// Контекст агента за формулою graph.md:
+/// `[task.md] + [a.md|h.md] + [deps/] + [plan_*.md] + [Prior attempts] +
+/// [run-summary.md] + [audit-result_*.md]`, поверх протоколу поведінки
+/// (`.mt/system-prompt.md`).
+///
+/// Кожен блок опційний: відсутній файл просто прибирає секцію, щоб короткий
+/// вузол не отримував порожніх заголовків.
+fn build_agent_prompt(
+    task_path: &str,
+    node_dir: &Path,
+    tasks_root: &Path,
+    system_prompt: Option<&Path>,
+    nnn: &str,
+    budget_sec: u64,
+) -> String {
+    let mut blocks: Vec<String> = Vec::new();
+
+    if let Some(body) = system_prompt.and_then(file_body) {
+        blocks.push(format!("## Протокол виконання\n\n{body}"));
+    }
+    blocks.push(format!(
+        "## Задача: {task_path}\n\nРобоча директорія: {}\nRun NNN: {nnn}\nБюджет: {budget_sec}s",
         node_dir.display()
-    )
+    ));
+    if let Some(body) = file_body(&node_dir.join("task.md")) {
+        blocks.push(format!("## task.md\n\n{body}"));
+    }
+    for flag in ["a.md", "h.md"] {
+        if let Some(body) = fs::read_to_string(node_dir.join(flag))
+            .ok()
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty())
+        {
+            blocks.push(format!("## Прапор виконавця ({flag})\n\n```yaml\n{body}\n```"));
+        }
+    }
+    let deps = dep_facts(tasks_root, node_dir);
+    if !deps.is_empty() {
+        blocks.push(format!(
+            "## Результати залежностей\n\n{}",
+            deps.join("\n\n")
+        ));
+    }
+    if let Some(body) = latest_artifact_body(node_dir, "plan_") {
+        blocks.push(format!("## Актуальний план\n\n{body}"));
+    }
+    // Другий шар стискання: якщо є LLM-резюме, сирі спроби не дублюються.
+    if let Some(body) = file_body(&node_dir.join("run-summary.md")) {
+        blocks.push(format!("## Резюме попередніх спроб\n\n{body}"));
+    } else {
+        let attempts = prior_attempts(node_dir);
+        if !attempts.is_empty() {
+            blocks.push(format!(
+                "## Попередні спроби (не повторюй ці помилки)\n\n{}",
+                attempts.join("\n\n")
+            ));
+        }
+    }
+    if let Some(body) = latest_artifact_body(node_dir, "audit-result_") {
+        blocks.push(format!("## Вердикт аудиту\n\n{body}"));
+    }
+    if let Some(body) = latest_artifact_body(node_dir, "clarification_") {
+        blocks.push(format!("## Запит уточнення від аудитора\n\n{body}"));
+    }
+
+    blocks.push(format!(
+        "## Обов'язковий фінальний крок\n\nСтвори файл `fact_{nnn}.md` у робочій директорії. \
+         Без нього run вважається ПРОВАЛЕНИМ, навіть якщо решту зроблено. Приклад:\n\n\
+         ```markdown\n## Summary\n\n<одне речення про результат>\n```"
+    ));
+
+    blocks.join("\n\n")
 }
 
 /// Preflight за спекою: a.md, deps resolved, без відкритого аудиту, вузол не
@@ -748,7 +854,21 @@ pub fn run_node_env(
     // за rate-limit (node_executor видалено — PR #48).
     let mut used_agent_cli: Option<String> = None;
     let watched: Option<WatchedOutcome> = {
-        let prompt = build_agent_prompt(node_path, &dir, &nnn_s, plan.budget_sec);
+        // Контекст збирається з worktree — саме там актуальні артефакти
+        // вузла та його залежностей на момент цієї спроби.
+        let wt_tasks_root = worktree.join(&tasks_root_rel);
+        let system_prompt = config
+            .get("system_prompt")
+            .and_then(serde_json::Value::as_str)
+            .map(|rel| worktree.join(rel));
+        let prompt = build_agent_prompt(
+            node_path,
+            &dir,
+            &wt_tasks_root,
+            system_prompt.as_deref(),
+            &nnn_s,
+            plan.budget_sec,
+        );
         let mut outcome = None;
         for cli in cascade_order(&plan.agent_cli, &cli_env.cloud_agent_clis) {
             let model = resolve_model_for_cli(cli_env, &cli, &plan.model_tier);
@@ -1036,6 +1156,142 @@ mod tests {
         // Коротша драбина — останній щабель повторюється, без ескалації тиру.
         assert_eq!(plan.retry_strategy, "diagnose-first");
         assert_eq!(plan.model_tier, "AVG");
+    }
+
+    // ── контекст агента (graph.md, «Контекст агента») ──
+
+    /// Дерево `<tmp>/mt/<node>` з файлами; повертає зібраний промпт.
+    fn prompt_for(node: &str, files: &[(&str, &str)], extra: &[(&str, &str)]) -> String {
+        let tmp = tempfile::tempdir().unwrap();
+        let tasks_root = tmp.path().join("mt");
+        let dir = tasks_root.join(node);
+        fs::create_dir_all(&dir).unwrap();
+        for (name, content) in files {
+            let path = dir.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        }
+        // Файли поза вузлом (залежності, system-prompt) — відносно tasks_root.
+        for (rel, content) in extra {
+            let path = tasks_root.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        }
+        let sp = tasks_root.join("system-prompt.md");
+        build_agent_prompt(node, &dir, &tasks_root, Some(&sp), "003", 600)
+    }
+
+    #[test]
+    fn context_has_task_body_and_final_step() {
+        let p = prompt_for("solo", &[("task.md", TASK)], &[]);
+        assert!(p.contains("## task.md"));
+        assert!(p.contains("Обов'язковий фінальний крок"));
+        assert!(p.contains("fact_003.md"));
+        // Порожніх заголовків для відсутніх артефактів немає.
+        assert!(!p.contains("Актуальний план"));
+        assert!(!p.contains("Попередні спроби"));
+        assert!(!p.contains("Результати залежностей"));
+    }
+
+    #[test]
+    fn context_includes_system_prompt_and_flag() {
+        let p = prompt_for(
+            "solo",
+            &[("task.md", TASK), ("a.md", FLAG)],
+            &[("system-prompt.md", "Протокол: спершу тести.\n")],
+        );
+        assert!(p.contains("Протокол виконання"));
+        assert!(p.contains("спершу тести"));
+        assert!(p.contains("Прапор виконавця (a.md)"));
+        assert!(p.contains("model_tier: AVG"));
+    }
+
+    #[test]
+    fn context_inlines_dependency_facts_not_edge_files() {
+        let p = prompt_for(
+            "solo",
+            &[("task.md", TASK), ("deps/collect.md", "")],
+            &[(
+                "collect/fact_001.md",
+                "---\nschema_version: 1\n---\n\n## Summary\n\nЗібрано 42 рядки.\n",
+            )],
+        );
+        assert!(p.contains("Результати залежностей"));
+        assert!(p.contains("### collect"));
+        assert!(p.contains("Зібрано 42 рядки"), "інлайниться fact, не ребро");
+    }
+
+    #[test]
+    fn context_compacts_prior_attempts_to_sections() {
+        let run = "---\nschema_version: 1\nresult: failed\n---\n\n## Completed\n\nнічого\n\n\
+                   ## Blockers\n\nтест X падає\n\n## Next Attempt\n\nполагодити X\n\n\
+                   ## Executor output tail\n\n```text\nдовгий сирий лог\n```\n";
+        let p = prompt_for(
+            "solo",
+            &[("task.md", TASK), ("run_001.md", run), ("run_002.md", run)],
+            &[],
+        );
+        assert!(p.contains("Попередні спроби"));
+        assert!(p.contains("Спроба 001") && p.contains("Спроба 002"));
+        assert!(p.contains("тест X падає"));
+        // Перший шар стискання: сирий хвіст логу в промпт не тягнеться.
+        assert!(!p.contains("довгий сирий лог"));
+    }
+
+    #[test]
+    fn run_summary_replaces_raw_attempts() {
+        let run = "---\nresult: failed\n---\n\n## Blockers\n\nтест X падає\n";
+        let p = prompt_for(
+            "solo",
+            &[
+                ("task.md", TASK),
+                ("run_001.md", run),
+                ("run-summary.md", "Три спроби впирались в конфіг.\n"),
+            ],
+            &[],
+        );
+        assert!(p.contains("Резюме попередніх спроб"));
+        assert!(p.contains("Три спроби впирались"));
+        // Другий шар стискання витісняє перший, а не додається до нього.
+        assert!(!p.contains("Спроба 001"));
+    }
+
+    #[test]
+    fn attempts_reset_after_accepted_fact() {
+        let run = "---\nresult: failed\n---\n\n## Blockers\n\nстаре\n";
+        let p = prompt_for(
+            "solo",
+            &[
+                ("task.md", TASK),
+                ("run_001.md", run),
+                ("fact_002.md", "---\n---\n\n## Summary\n\nok\n"),
+            ],
+            &[],
+        );
+        // Прийнятий fact_002 закриває історію: run_001 більше не релевантний.
+        assert!(!p.contains("Попередні спроби"), "got: {p}");
+    }
+
+    #[test]
+    fn context_includes_audit_verdict_and_clarification() {
+        let p = prompt_for(
+            "solo",
+            &[
+                ("task.md", TASK),
+                (
+                    "audit-result_001.md",
+                    "---\nresult: failed\n---\n\nНе покрито крайній випадок.\n",
+                ),
+                (
+                    "clarification_001.md",
+                    "---\n---\n\nЧому обрано саме цей алгоритм?\n",
+                ),
+            ],
+            &[],
+        );
+        assert!(p.contains("Вердикт аудиту"));
+        assert!(p.contains("Не покрито крайній випадок"));
+        assert!(p.contains("Запит уточнення"));
     }
 
     // ── класифікація підсумку publish (git.md) ──

@@ -232,7 +232,7 @@ fn parse_frontmatter(content: &str) -> Frontmatter {
 
 // ── NNN helpers ───────────────────────────────────────────────────────────────
 
-fn max_nnn(dir: &Path, prefix: &str, suffix: &str) -> u64 {
+pub(crate) fn max_nnn(dir: &Path, prefix: &str, suffix: &str) -> u64 {
     fs::read_dir(dir)
         .ok()
         .into_iter()
@@ -278,7 +278,7 @@ fn run_is_failure(path: &Path) -> bool {
 // або з audit-result_N: success. Відхилений аудитом fact прийнятим НЕ є, тому
 // межу не рухає — інакше цикл «провал → провал → сирий fact → аудит відхилив»
 // обнуляв би лічильник вічно, і драбина ніколи не дійшла б до engineer/unresolvable.
-fn accepted_fact_nnn(dir: &Path) -> u64 {
+pub(crate) fn accepted_fact_nnn(dir: &Path) -> u64 {
     match accepted_fact_state(dir) {
         FactState::Resolved => max_nnn(dir, "fact_", ".md"),
         FactState::PendingAudit | FactState::None => 0,
@@ -671,7 +671,7 @@ fn collect_deps(deps_root: &Path, current: &Path, result: &mut Vec<String>) {
     }
 }
 
-fn read_deps_dir(node_dir: &Path) -> Vec<String> {
+pub(crate) fn read_deps_dir(node_dir: &Path) -> Vec<String> {
     let deps_dir = node_dir.join("deps");
     if !deps_dir.is_dir() {
         return vec![];
