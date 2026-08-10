@@ -384,6 +384,101 @@ fn prior_attempts(node_dir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Хто виконує run (graph.md, `actor:` у `run_NNN.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Actor {
+    /// Звичайний виконавець вузла.
+    Agent,
+    /// Ремонтник графа — вмикається, коли драбина агента вичерпана.
+    Engineer,
+}
+
+impl Actor {
+    fn as_str(self) -> &'static str {
+        match self {
+            Actor::Agent => "agent",
+            Actor::Engineer => "engineer",
+        }
+    }
+}
+
+/// Сирий run-history вузла після останнього прийнятого fact — **без**
+/// стискання, на відміну від контексту агента.
+///
+/// Інженеру потрібні саме подробиці: він шукає причину в тому, що агент
+/// відкинув як шум (хвіст виводу виконавця, точні повідомлення про помилки),
+/// тож перший шар стискання тут був би втратою доказів.
+fn full_run_history(node_dir: &Path) -> Vec<String> {
+    let since = crate::accepted_fact_nnn(node_dir);
+    let latest = crate::max_nnn(node_dir, "run_", ".md");
+    (since + 1..=latest)
+        .filter_map(|nnn| {
+            let body = file_body(&node_dir.join(format!("run_{nnn:03}.md")))?;
+            Some(format!("### run_{nnn:03}.md\n\n{body}"))
+        })
+        .collect()
+}
+
+/// Контекст EngineerAgent (graph.md): task + deps + **повний** run-history +
+/// `.mt/engineer-prompt.md`.
+///
+/// Інженер не виконує задачу — він лагодить граф, тому промпт закінчується
+/// не вимогою fact-у, а переліком дозволених втручань.
+fn build_engineer_prompt(
+    task_path: &str,
+    node_dir: &Path,
+    tasks_root: &Path,
+    engineer_prompt: Option<&Path>,
+    nnn: &str,
+) -> String {
+    let mut blocks: Vec<String> = Vec::new();
+    if let Some(body) = engineer_prompt.and_then(file_body) {
+        blocks.push(format!("## Протокол інженера\n\n{body}"));
+    }
+    blocks.push(format!(
+        "## Ремонт вузла: {task_path}\n\nРобоча директорія: {}\nRun NNN: {nnn}\n\n\
+         Драбина ретраїв вичерпана — звичайний виконавець уже не дає результату. \
+         Твоя робота не «спробувати ще раз тим самим способом», а знайти **причину** \
+         і полагодити граф.",
+        node_dir.display()
+    ));
+    if let Some(body) = file_body(&node_dir.join("task.md")) {
+        blocks.push(format!("## task.md\n\n{body}"));
+    }
+    let deps = dep_facts(tasks_root, node_dir);
+    if !deps.is_empty() {
+        blocks.push(format!(
+            "## Результати залежностей\n\n{}",
+            deps.join("\n\n")
+        ));
+    }
+    let history = full_run_history(node_dir);
+    if !history.is_empty() {
+        blocks.push(format!(
+            "## Повна історія спроб\n\n{}",
+            history.join("\n\n")
+        ));
+    }
+    if let Some(body) = latest_artifact_body(node_dir, "audit-result_") {
+        blocks.push(format!("## Вердикт аудиту\n\n{body}"));
+    }
+    blocks.push(
+        "## Дозволені втручання\n\n\
+         - `mt invalidate <вузол>` — скинути version chain і дати вузлу чистий старт \
+           (за потреби спершу виправивши `task.md`);\n\
+         - `mt kill <вузол>` — прибрати помилково створене піддерево;\n\
+         - правка `task.md` вузла, якщо контракт сформульовано так, що його неможливо виконати;\n\
+         - правка `a.md` — інший `model_tier`, інший `agent_cli`, інші `skills`.\n\n\
+         Якщо причину усунуто і вузол готовий до звичайного виконання — опиши це \
+         в `run-draft.md` секціями `## Completed` / `## Blockers` / `## Next Attempt`. \
+         Якщо ти сам довів задачу до результату — напиши `fact_" .to_string()
+            + nnn
+            + ".md` з `## Summary`.",
+    );
+    blocks.join("\n\n")
+}
+
 /// `decision:` актуального `plan_NNN.md` — atomic | composite.
 fn latest_plan_decision(dir: &Path) -> Option<String> {
     let nnn = crate::max_nnn(dir, "plan_", ".md");
@@ -824,13 +919,52 @@ pub fn run_node(tasks_dir: &str, node_path: &str) -> Result<RunOutcome, String> 
     run_node_env(tasks_dir, node_path, &agent_cli_env_from_process())
 }
 
+/// [`run_node`] із явним актором — `mt run --actor engineer` (graph.md).
+pub fn run_node_as(tasks_dir: &str, node_path: &str, actor: Actor) -> Result<RunOutcome, String> {
+    run_node_env_as(
+        tasks_dir,
+        node_path,
+        &agent_cli_env_from_process(),
+        actor,
+    )
+}
+
 /// Як [`run_node`], але з явним конфігом виконавців (ін'єкція для тестів).
 pub fn run_node_env(
     tasks_dir: &str,
     node_path: &str,
     cli_env: &AgentCliEnv,
 ) -> Result<RunOutcome, String> {
+    run_node_env_as(tasks_dir, node_path, cli_env, Actor::Agent)
+}
+
+/// [`run_node_env`] із явним актором.
+pub fn run_node_env_as(
+    tasks_dir: &str,
+    node_path: &str,
+    cli_env: &AgentCliEnv,
+    actor: Actor,
+) -> Result<RunOutcome, String> {
     let plan = preflight_env(tasks_dir, node_path, cli_env)?;
+    // Інженер вмикається лише коли драбина агента вичерпана (graph.md:
+    // `failed_streak ≥ agent_retry_max`). Інакше найдорожчий актор
+    // витрачався б на вузол, який ще навіть не пробували як слід.
+    if actor == Actor::Engineer {
+        let dir = node_dir(tasks_dir, node_path)?;
+        let config = merge_config(
+            fs::read_to_string(Path::new(tasks_dir).join("../.mt.json"))
+                .ok()
+                .as_deref(),
+        );
+        let agent_retry_max = fm_u64(&config, "agent_retry_max").unwrap_or(3);
+        let streak = crate::failed_streak(&dir);
+        if streak < agent_retry_max {
+            return Err(format!(
+                "{node_path}: інженер вмикається після вичерпання драбини агента \
+                 ({streak} провалів із {agent_retry_max}) — спершу штатні ретраї"
+            ));
+        }
+    }
 
     let repo_root = discover_repo_root(Path::new(tasks_dir))?;
     let tasks_root_rel = tasks_root_relative(&repo_root, Path::new(tasks_dir))?;
@@ -962,7 +1096,9 @@ pub fn run_node_env(
     let run_task_fm = fs::read_to_string(dir.join("task.md"))
         .map(|c| parse_front_matter(&c))
         .unwrap_or_else(|_| serde_json::json!({}));
-    if needs_planning(&dir, &run_task_fm) {
+    // Інженер не планує задачу — він лагодить граф, тож Етап 1 його не
+    // стосується.
+    if actor == Actor::Agent && needs_planning(&dir, &run_task_fm) {
         let planning_prompt = build_plan_prompt(
             node_path,
             &dir,
@@ -981,14 +1117,27 @@ pub fn run_node_env(
     let watched: Option<WatchedOutcome> = if decomposed {
         None
     } else {
-        let prompt = build_agent_prompt(
-            node_path,
-            &dir,
-            &wt_tasks_root,
-            system_prompt.as_deref(),
-            &nnn_s,
-            plan.budget_sec,
-        );
+        let prompt = match actor {
+            Actor::Agent => build_agent_prompt(
+                node_path,
+                &dir,
+                &wt_tasks_root,
+                system_prompt.as_deref(),
+                &nnn_s,
+                plan.budget_sec,
+            ),
+            Actor::Engineer => build_engineer_prompt(
+                node_path,
+                &dir,
+                &wt_tasks_root,
+                config
+                    .get("engineer_prompt")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|rel| worktree.join(rel))
+                    .as_deref(),
+                &nnn_s,
+            ),
+        };
         run_phase(&prompt)?
     };
     // Динамічна декомпозиція під час Етапу 2: агент дописав новий composite-
@@ -1017,7 +1166,7 @@ pub fn run_node_env(
              ## Blockers\n\nнемає — потрібен людський апрув плану\n\n\
              ## Next Attempt\n\n`mt spawn --approve` матеріалізує дітей\n"
         );
-        let run_file = write_run_fm(&dir, &nnn_s, "agent", "decomposed", &sections, &extra_fm)?;
+        let run_file = write_run_fm(&dir, &nnn_s, actor.as_str(), "decomposed", &sections, &extra_fm)?;
         ("decomposed".to_string(), run_file, None, Vec::new())
     } else if kill_reason.is_none() && has_fact {
         let policy_required = fs::read_to_string(dir.join("task.md"))
@@ -1030,9 +1179,9 @@ pub fn run_node_env(
             })
             .unwrap_or(false);
         let signaled = if policy_required {
-            signal::audit_fm(&wt_tasks_dir_str, node_path, "agent", &extra_fm)
+            signal::audit_fm(&wt_tasks_dir_str, node_path, actor.as_str(), &extra_fm)
         } else {
-            signal::done_fm(&wt_tasks_dir_str, node_path, "agent", &extra_fm)
+            signal::done_fm(&wt_tasks_dir_str, node_path, actor.as_str(), &extra_fm)
         };
         match signaled {
             Ok(out) => (
@@ -1048,7 +1197,7 @@ pub fn run_node_env(
                 let sections = format!(
                     "\n## Completed\n\nfact записано, але ## Check не пройшов (fact відкликано)\n\n## Blockers\n\n{check_err}\n\n## Next Attempt\n\nвиправити і повторити done\n"
                 );
-                let run_file = write_run_fm(&dir, &nnn_s, "agent", "failed", &sections, &extra_fm)?;
+                let run_file = write_run_fm(&dir, &nnn_s, actor.as_str(), "failed", &sections, &extra_fm)?;
                 ("failed".to_string(), run_file, None, Vec::new())
             }
         }
@@ -1079,7 +1228,7 @@ pub fn run_node_env(
         let sections = format!(
             "\n## Completed\n\n{completed}\n\n## Blockers\n\n{blockers}\n\n## Next Attempt\n\n{next}\n{output_tail}"
         );
-        let run_file = write_run_fm(&dir, &nnn_s, "agent", &result, &sections, &extra_fm)?;
+        let run_file = write_run_fm(&dir, &nnn_s, actor.as_str(), &result, &sections, &extra_fm)?;
         (result, run_file, None, Vec::new())
     };
 
@@ -1270,6 +1419,83 @@ mod tests {
         // Коротша драбина — останній щабель повторюється, без ескалації тиру.
         assert_eq!(plan.retry_strategy, "diagnose-first");
         assert_eq!(plan.model_tier, "AVG");
+    }
+
+    // ── EngineerAgent (graph.md, «Retry ladder, engineer, unresolvable») ──
+
+    #[test]
+    fn engineer_waits_until_agent_ladder_is_exhausted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mt");
+        node_files_only(&root, "solo");
+        let r = root.to_string_lossy().into_owned();
+
+        // Драбина ще не вичерпана — найдорожчий актор не витрачається.
+        let err = run_node_env_as(&r, "solo", &env_default(), Actor::Engineer).unwrap_err();
+        assert!(err.contains("вичерпання драбини агента"), "got: {err}");
+        assert!(err.contains("0 провалів із 3"), "got: {err}");
+    }
+
+    #[test]
+    fn engineer_history_is_raw_not_compacted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("solo");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("task.md"), TASK).unwrap();
+        let run = "---\nschema_version: 1\nresult: failed\n---\n\n## Blockers\n\nтест X падає\n\n\
+                   ## Executor output tail\n\n```text\nсирий лог із деталями\n```\n";
+        fs::write(dir.join("run_001.md"), run).unwrap();
+        fs::write(dir.join("run_002.md"), run).unwrap();
+
+        let p = build_engineer_prompt("solo", &dir, tmp.path(), None, "003");
+        assert!(p.contains("Повна історія спроб"));
+        assert!(p.contains("run_001.md") && p.contains("run_002.md"));
+        // Інженеру потрібні саме подробиці, які агентський контекст стискає.
+        assert!(
+            p.contains("сирий лог із деталями"),
+            "хвіст виводу має лишитись: {p}"
+        );
+        assert!(p.contains("Дозволені втручання"));
+        assert!(p.contains("mt invalidate") && p.contains("mt kill"));
+        // Це не промпт виконання: інженер не зобов'язаний писати fact.
+        assert!(!p.contains("Обов'язковий фінальний крок"));
+    }
+
+    #[test]
+    fn engineer_history_resets_after_accepted_fact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("solo");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("run_001.md"), "---\nresult: failed\n---\n\n## Blockers\n\nстаре\n")
+            .unwrap();
+        fs::write(dir.join("fact_002.md"), "---\n---\n\n## Summary\n\nok\n").unwrap();
+        assert!(full_run_history(&dir).is_empty());
+    }
+
+    #[test]
+    fn engineer_run_is_recorded_as_engineer_actor() {
+        let repo = TestRepo::new();
+        let root = repo.work.path().join("mt");
+        node(&root, "solo");
+        let dir = root.join("solo");
+        // Драбина агента вичерпана: три провали поспіль.
+        for nnn in 1..=3 {
+            fs::write(
+                dir.join(format!("run_{nnn:03}.md")),
+                "---\nschema_version: 1\nresult: failed\n---\n",
+            )
+            .unwrap();
+        }
+        crate::test_support::commit_all(repo.work.path(), "failed runs");
+        crate::test_support::push_head(repo.work.path(), "refs/heads/main");
+
+        let r = root.to_string_lossy().into_owned();
+        with_path_shims(&[("claude", FAKE_CLI_WRITES_FACT)], || {
+            let out = run_node_env_as(&r, "solo", &env_default(), Actor::Engineer).unwrap();
+            assert_eq!(out.result, "success");
+        });
+        let run = fs::read_to_string(dir.join("run_004.md")).unwrap();
+        assert!(run.contains("actor: engineer"), "got: {run}");
     }
 
     // ── Етап 1: планування (graph.md, «Два етапи виконання») ──

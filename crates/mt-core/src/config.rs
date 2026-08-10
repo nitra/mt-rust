@@ -35,7 +35,8 @@ pub fn config_defaults() -> Value {
         "publish_retry_max": 8,
         "publish_retry_base_ms": 250,
         "stale_worktree_min": 30,
-        "system_prompt": ".mt/system-prompt.md"
+        "system_prompt": ".mt/system-prompt.md",
+        "engineer_prompt": ".mt/engineer-prompt.md"
     })
 }
 
