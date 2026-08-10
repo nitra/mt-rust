@@ -298,6 +298,122 @@ pub fn publish_failure_run(
     })
 }
 
+/// Одна зміна файлу для lifecycle-публікації: `Some` — записати вміст,
+/// `None` — видалити шлях (архівування/kill).
+pub type FileChange = (String, Option<String>);
+
+/// Атомарна публікація **lifecycle-зміни** графа: `spawn --approve`,
+/// `invalidate`, `kill` (graph.md: «комітить … одним fenced atomic commit»).
+///
+/// На відміну від [`fenced_publish`], claim тут ні до чого: ці операції
+/// виконує людина або CLI, а не власник claim-у, тож фенситься лише сам
+/// `main` (`--force-with-lease`). Зміни збираються в ефемерному worktree від
+/// свіжого `origin/main` — робоче дерево користувача не чіпається, а
+/// конкурентний push у `main` не призводить до часткового стану: або
+/// проходить увесь набір файлів, або жоден.
+pub fn publish_lifecycle(
+    repo_root: &Path,
+    worktrees_dir: &Path,
+    changes: &[FileChange],
+    message: &str,
+    retry_max: u32,
+    base_ms: u64,
+) -> Result<PublishOutcome, String> {
+    if changes.is_empty() {
+        return Ok(PublishOutcome {
+            published: true,
+            fenced: false,
+            result_sha: None,
+            attempts: 0,
+        });
+    }
+    let repository = GitRepository::open(repo_root).map_err(|error| error.to_string())?;
+
+    for attempt in 0..retry_max.max(1) {
+        repository
+            .fetch_refspec("+refs/heads/main:refs/remotes/origin/main")
+            .map_err(|error| error.to_string())?;
+        let main_sha_before = repository
+            .resolve_ref("refs/remotes/origin/main")
+            .map_err(|error| error.to_string())?;
+
+        let token = format!("lifecycle-{attempt}");
+        let wt = crate::worktree::create_run_worktree(
+            repo_root,
+            worktrees_dir,
+            "lifecycle",
+            &token,
+            &main_sha_before,
+        )?;
+
+        let apply = || -> Result<Option<String>, String> {
+            for (rel, content) in changes {
+                let target = wt.join(rel);
+                match content {
+                    Some(text) => {
+                        if let Some(parent) = target.parent() {
+                            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                        }
+                        std::fs::write(&target, text).map_err(|e| e.to_string())?;
+                    }
+                    None => {
+                        if target.is_dir() {
+                            std::fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
+                        } else if target.exists() {
+                            std::fs::remove_file(&target).map_err(|e| e.to_string())?;
+                        }
+                    }
+                }
+            }
+            GitRepository::open(&wt)
+                .map_err(|e| e.to_string())?
+                .commit_all_if_changed(message, crate::git::SignaturePolicy::Runner)
+                .map_err(|e| e.to_string())
+        };
+
+        let committed = apply();
+        let pushed = match &committed {
+            Ok(Some(result_sha)) => {
+                let lease = format!("--force-with-lease=refs/heads/main:{main_sha_before}");
+                let refspec = format!("{result_sha}:refs/heads/main");
+                compat::push_atomic(&wt, &["push", "--atomic", &lease, "origin", &refspec])
+                    .map_err(|error| error.to_string())
+            }
+            // Нема diff — стан уже такий, як просили: ідемпотентність.
+            Ok(None) => Ok(true),
+            Err(error) => Err(error.clone()),
+        };
+
+        let _ = crate::worktree::remove_run_worktree(repo_root, &wt);
+
+        match (pushed, committed) {
+            (Ok(true), Ok(sha)) => {
+                if let Some(sha) = &sha {
+                    let _ = sync_local_main(repo_root, sha);
+                }
+                return Ok(PublishOutcome {
+                    published: true,
+                    fenced: false,
+                    result_sha: sha,
+                    attempts: attempt + 1,
+                });
+            }
+            (Err(error), _) => return Err(error),
+            _ => {}
+        }
+
+        let backoff = base_ms.saturating_mul(1u64 << attempt.min(16));
+        std::thread::sleep(Duration::from_millis(backoff + jitter_ms(base_ms)));
+    }
+
+    Ok(PublishOutcome {
+        published: false,
+        fenced: false,
+        result_sha: None,
+        attempts: retry_max,
+    })
+}
+
 /// Best-effort ff-only синхронізація локального `main` після власного
 /// publish — щоб живий working tree (яке бачить FS-watcher GUI) одразу
 /// відобразило результат без ручного `git pull`. Мовчки ігнорує невдачу

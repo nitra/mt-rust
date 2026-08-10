@@ -643,7 +643,7 @@ fn fresh_token() -> String {
     format!("{nanos:x}-{}", std::process::id())
 }
 
-fn worktrees_dir_path(repo_root: &Path, config: &serde_json::Value) -> PathBuf {
+pub(crate) fn worktrees_dir_path(repo_root: &Path, config: &serde_json::Value) -> PathBuf {
     let raw = config
         .get("worktrees_dir")
         .and_then(serde_json::Value::as_str)
