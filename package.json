@@ -23,6 +23,7 @@
     "@nitra/eslint-config": "^3.10.3",
     "@stryker-mutator/vitest-runner": "^9.6.1",
     "@vitest/coverage-v8": "^4.1.10",
+    "knip": "^6.32.1",
     "vitest": "^4.1.10"
   },
   "engines": {

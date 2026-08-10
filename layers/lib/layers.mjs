@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-export const CONFIG_NAME = 'layers.json'
+const CONFIG_NAME = 'layers.json'
 
 const LAYER_RE = /^L(\d+)$/
 const MD_EXT_RE = /\.md$/
@@ -120,7 +120,7 @@ function validateFragmentSources(docs, sourcedBy) {
  * @param {ReturnType<typeof loadConfig>} config результат loadConfig
  * @returns {string[]} помилки (порожньо — конфіг валідний)
  */
-export function validateConfig(config) {
+function validateConfig(config) {
   const errors = []
   const sourcedBy = new Map()
   for (const [file, entry] of Object.entries(config.docs)) {
