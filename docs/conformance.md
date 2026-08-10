@@ -29,13 +29,13 @@
 | Підсистема | Вердикт | Де в коді | Чого бракує |
 | --- | --- | --- | --- |
 | Сканування графа, `deps/`, denylist | РЕАЛІЗОВАНО | `lib.rs` `scan_tasks`/`scan_dir` | — |
-| Derived-стани вузла | ЧАСТКОВО | `lib.rs` `detect_state` | `stalled` не виводиться (немає інтеграції з remote claim refs); `blocked-invalid-dep` як warning (поверхня `TaskNode.warnings` уже є) |
+| Derived-стани вузла | РЕАЛІЗОВАНО | `lib.rs` `detect_state`/`apply_remote_claims`/`scan_tasks_with_claims` | — (`blocked-invalid-dep` як warning — поверхня `TaskNode.warnings` є, окремий рядок беклогу) |
 | `failed_streak`: категорія `result` + межа «прийнятий fact» | РЕАЛІЗОВАНО | `lib.rs` `failed_streak`/`is_execution_failure`/`accepted_fact_nnn` | — |
 | Файловий контракт `a.md`/`h.md` | ЧАСТКОВО | `lib.rs` `write_executor_flag`, `runner.rs` `read_executor_flag` | Формат — YAML-фронтматер (закрито); читаються `model_tier`, `agent_cli`, `retry_ladder`. Ще не спожиті: `secrets` (брокер), `interactive`, `assignee`, `parent` |
 | Артефакти version chain (читання) | РЕАЛІЗОВАНО | `artifacts.rs` | — |
 | `schema_version` fail-closed | РЕАЛІЗОВАНО | `frontmatter.rs` `schema_version_of`/`check_schema_version`; гейти — `runner.rs` preflight, `signal.rs` `node_dir`, `spawn.rs` `plan_review` | — (невідома версія — жорстка відмова; відсутнє поле — попередження скану, див. «Закриті питання») |
 | Гейт immutability (`task.md`/`a.md`/`h.md` проти `origin/main`) | РЕАЛІЗОВАНО | `signal.rs` `check_contract_unchanged` (у `signal_success`) | — (стоїть на `done`/`audit`; `failed` свідомо не гейтиться) |
-| Claims: CAS, lease, grace, takeover | РЕАЛІЗОВАНО | `claims.rs` | `fetch_remote_claims` існує, але не викликається з продакшн-коду |
+| Claims: CAS, lease, grace, takeover | РЕАЛІЗОВАНО | `claims.rs`; читач — `lib.rs` `scan_tasks_with_claims`, CLI `mt status` | — |
 | Fenced publish + failure-сімейство | РЕАЛІЗОВАНО | `publish.rs` `fenced_publish`/`publish_failure_run`, `runner.rs` `terminal_conflict_reason` | Батчинг кількох результатів одним push |
 | Run-wrapper, watchdog | РЕАЛІЗОВАНО | `runner.rs` | — |
 | Retry ladder + каскад CLI | РЕАЛІЗОВАНО | `runner.rs` | Телеметрія `tokens_in/out`/`cost_usd` не збирається |
@@ -46,7 +46,7 @@
 | Composite-агрегація вгору | РЕАЛІЗОВАНО | `signal.rs` `propagate_composite` | — |
 | Протокол spawn | РЕАЛІЗОВАНО | `spawn.rs` `spawn_approve`/`publish_spawn`, `publish.rs` `publish_lifecycle` | — (`plan_reject_max` закрито через `unresolvable`) |
 | Git-протокол `invalidate`/`kill` + re-run семантика | РЕАЛІЗОВАНО | `lifecycle.rs` `publish_mutation`/`stop`/`reconcile_after_rerun`; CLI — `mt stop` | — |
-| Оркестрація `run --auto` | ЧАСТКОВО | `orchestrate.rs` | Батчинг замість continuous backfill; немає periodic rescan, remote claims, wake |
+| Оркестрація `run --auto` | ЧАСТКОВО | `orchestrate.rs` `run_auto` | Continuous backfill і rescan на кожній події — є; лишається wake (подієвий запуск) — orchestrator-роль |
 | Worktree lifecycle | РЕАЛІЗОВАНО | `worktree.rs` | — |
 | Git-межа (`gix` + вузький shim) | РЕАЛІЗОВАНО | `git/` | — |
 | Аудит-цикл: вердикт, clarification, amend, `audit_failed_streak` | РЕАЛІЗОВАНО | `audit.rs`; CLI — `mt verdict`/`mt clarify`/`mt amend` | — |

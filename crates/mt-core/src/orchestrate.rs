@@ -76,16 +76,27 @@ pub fn sort_for_auto<'a>(all: &[&'a TaskNode], waiting: Vec<&'a TaskNode>) -> Ve
     sorted
 }
 
-/// Один прохід оркестратора: до вичерпання waiting-агентських вузлів прогонить
-/// їх чергами по `concurrency` (кожен вузол — окремий потік через
-/// [`run_node`]). Вузол, що впав на preflight (гонка/зникла умова), більше не
-/// підбирається в межах цього виклику — гарантує термінацію.
+/// Один прохід оркестратора з **continuous backfill**: тримає до
+/// `concurrency` вузлів у роботі й підхоплює наступного щойно звільняється
+/// слот, а не після завершення всієї пачки.
+///
+/// Різниця не косметична: за батчингу найповільніший вузол пачки тримав усі
+/// інші слоти порожніми до свого завершення, і граф із одним «важким»
+/// вузлом виконувався майже послідовно.
+///
+/// Вузол, що впав на preflight (гонка/зникла умова), більше не підбирається
+/// в межах цього виклику — гарантія термінації.
 pub fn run_auto(tasks_dir: &str, concurrency: usize) -> Result<Vec<AutoResult>, String> {
     let mut results = Vec::new();
     let mut skip: HashSet<String> = HashSet::new();
+    let mut in_flight: HashSet<String> = HashSet::new();
     let concurrency = concurrency.max(1);
+    let (tx, rx) = std::sync::mpsc::channel::<(String, Result<crate::runner::RunOutcome, String>)>();
 
     loop {
+        // Rescan на кожній ітерації — не марнотратство, а і є backfill:
+        // вузол, чиї deps щойно закрились, стає видимим одразу, а не після
+        // того, як добіжить уся поточна пачка.
         let worktrees = discover_worktrees(Path::new(tasks_dir));
         let tree = scan_tasks(tasks_dir.to_string(), worktrees)?;
         let all = flatten(&tree);
@@ -93,48 +104,52 @@ pub fn run_auto(tasks_dir: &str, concurrency: usize) -> Result<Vec<AutoResult>, 
             .iter()
             .copied()
             .filter(|n| {
-                n.mode == "agent" && n.state == TaskState::Waiting && !skip.contains(&n.path)
-            })
-            .collect();
-        if waiting.is_empty() {
-            break;
-        }
-
-        let batch: Vec<String> = sort_for_auto(&all, waiting)
-            .into_iter()
-            .take(concurrency)
-            .map(|n| n.path.clone())
-            .collect();
-        if batch.is_empty() {
-            break;
-        }
-
-        let handles: Vec<_> = batch
-            .into_iter()
-            .map(|path| {
-                let dir = tasks_dir.to_string();
-                std::thread::spawn(move || (path.clone(), run_node(&dir, &path)))
+                n.mode == "agent"
+                    && n.state == TaskState::Waiting
+                    && !skip.contains(&n.path)
+                    && !in_flight.contains(&n.path)
             })
             .collect();
 
-        for handle in handles {
-            let (path, outcome) = handle
-                .join()
-                .unwrap_or_else(|_| (String::new(), Err("run thread panicked".to_string())));
-            match outcome {
-                Ok(o) => results.push(AutoResult {
+        // Заповнюємо вільні слоти, не чекаючи на завершення попередніх.
+        for node in sort_for_auto(&all, waiting)
+            .into_iter()
+            .take(concurrency.saturating_sub(in_flight.len()))
+        {
+            let path = node.path.clone();
+            let dir = tasks_dir.to_string();
+            let tx = tx.clone();
+            in_flight.insert(path.clone());
+            std::thread::spawn(move || {
+                let outcome = run_node(&dir, &path);
+                let _ = tx.send((path, outcome));
+            });
+        }
+
+        if in_flight.is_empty() {
+            break; // нема чого запускати і нема чого чекати
+        }
+
+        // Блокуємось рівно до однієї події — і одразу назад по кандидатів.
+        let Ok((path, outcome)) = rx.recv() else {
+            break; // усі відправники зникли (не має статись, поки є in_flight)
+        };
+        in_flight.remove(&path);
+        match outcome {
+            Ok(o) => results.push(AutoResult {
+                path,
+                result: o.result,
+                error: None,
+            }),
+            Err(e) => {
+                // Вузол, що впав на preflight (гонка/зникла умова), більше не
+                // підбирається в межах цього виклику — гарантія термінації.
+                skip.insert(path.clone());
+                results.push(AutoResult {
                     path,
-                    result: o.result,
-                    error: None,
-                }),
-                Err(e) => {
-                    skip.insert(path.clone());
-                    results.push(AutoResult {
-                        path,
-                        result: "error".to_string(),
-                        error: Some(e),
-                    });
-                }
+                    result: "error".to_string(),
+                    error: Some(e),
+                });
             }
         }
     }
