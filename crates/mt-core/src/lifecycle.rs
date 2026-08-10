@@ -10,12 +10,89 @@
 //!   вузол); інакше архівується у `<tasks-root>/.history/<ts>-kill-<path>/`
 //!   і прибирається директорія; каскад повний за визначенням (піддерево).
 
+use std::collections::BTreeSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 
 use crate::validate_name;
+
+/// Знімок файлів піддерева шляхами відносно кореня репо. Відсутня
+/// директорія — порожній знімок (kill лишає саме такий стан).
+fn snapshot(repo_root: &Path, dir: &Path) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(snapshot(repo_root, &path));
+        } else if let Ok(rel) = path.strip_prefix(repo_root) {
+            out.insert(rel.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    out
+}
+
+/// Публікує наслідки lifecycle-мутації одним atomic commit: файли, що
+/// зникли — видаленнями, наявні — поточним вмістом (graph.md, «Протокол
+/// патчу вузла»: правка вузла завершується fenced publish).
+///
+/// Fail-open поза git-репозиторієм — як і `spawn`: на голому дереві
+/// публікувати нікуди, мутація лишається локальною.
+fn publish_mutation(
+    tasks_dir: &str,
+    before: &BTreeSet<String>,
+    after: &BTreeSet<String>,
+    message: &str,
+) -> Result<(), String> {
+    let Ok(repo_root) = crate::claims::discover_main_worktree_root(Path::new(tasks_dir)) else {
+        return Ok(());
+    };
+    let mut changes: Vec<crate::publish::FileChange> = Vec::new();
+    for gone in before.difference(after) {
+        changes.push((gone.clone(), None));
+    }
+    for present in after {
+        let content = fs::read_to_string(repo_root.join(present)).map_err(|e| e.to_string())?;
+        changes.push((present.clone(), Some(content)));
+    }
+    if changes.is_empty() {
+        return Ok(());
+    }
+
+    let config = crate::config::merge_config(
+        fs::read_to_string(repo_root.join(".mt.json")).ok().as_deref(),
+    );
+    let outcome = crate::publish::publish_lifecycle(
+        &repo_root,
+        &crate::runner::worktrees_dir_path(&repo_root, &config),
+        &changes,
+        message,
+        config
+            .get("publish_retry_max")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(8) as u32,
+        config
+            .get("publish_retry_base_ms")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(250),
+    )?;
+    if !outcome.published {
+        return Err(
+            "lifecycle: вичерпано publish retry — мутація лишилась локальною, повторіть пізніше"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Корінь репо для знімків, якщо ми в git-дереві.
+fn repo_root_for(tasks_dir: &str) -> Option<PathBuf> {
+    crate::claims::discover_main_worktree_root(Path::new(tasks_dir)).ok()
+}
 
 /// Префікси файлів version chain, які archive-ує invalidate (§ mt invalidate).
 const CHAIN_PREFIXES: [&str; 6] = [
@@ -90,9 +167,24 @@ pub fn invalidate(tasks_dir: &str, node_path: &str, cascade: bool) -> Result<Vec
     if !dir.join("task.md").is_file() {
         return Err(format!("node not found: {node_path}"));
     }
+    let repo_root = repo_root_for(tasks_dir);
+    let before = repo_root
+        .as_ref()
+        .map(|root| snapshot(root, &dir))
+        .unwrap_or_default();
+
     let ts = timestamp();
     let mut archived = Vec::new();
     invalidate_rec(&dir, node_path, &ts, cascade, &mut archived)?;
+
+    if let Some(root) = &repo_root {
+        publish_mutation(
+            tasks_dir,
+            &before,
+            &snapshot(root, &dir),
+            &format!("mt: invalidate {node_path}"),
+        )?;
+    }
     Ok(archived)
 }
 
@@ -156,21 +248,113 @@ pub fn kill(tasks_dir: &str, node_path: &str) -> Result<String, String> {
     if !dir.join("task.md").is_file() {
         return Err(format!("node not found: {node_path}"));
     }
-    if !has_run_artifacts(&dir) {
+    let repo_root = repo_root_for(tasks_dir);
+    let before = repo_root
+        .as_ref()
+        .map(|r| snapshot(r, &dir))
+        .unwrap_or_default();
+
+    // `mt kill` — «остаточне видалення піддерева з topology» (graph.md).
+    // У main публікується саме зникнення піддерева; локальний архів у
+    // `<tasks-root>/.history/` — страхувальна копія на машині, не частина
+    // топології, тому в коміт не йде.
+    let outcome = if has_run_artifacts(&dir) {
+        let archive_name = format!("{}-kill-{}", timestamp(), node_path.replace('/', "-"));
+        let history = root.join(".history");
+        fs::create_dir_all(&history).map_err(|e| e.to_string())?;
+        fs::rename(&dir, history.join(&archive_name)).map_err(|e| e.to_string())?;
+        format!(".history/{archive_name}")
+    } else {
         fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
-        return Ok(format!("deleted:{node_path}"));
+        format!("deleted:{node_path}")
+    };
+
+    if repo_root.is_some() {
+        publish_mutation(
+            tasks_dir,
+            &before,
+            &BTreeSet::new(),
+            &format!("mt: kill {node_path}"),
+        )?;
     }
-    let archive_name = format!("{}-kill-{}", timestamp(), node_path.replace('/', "-"));
-    let history = root.join(".history");
-    fs::create_dir_all(&history).map_err(|e| e.to_string())?;
-    let target = history.join(&archive_name);
-    fs::rename(&dir, &target).map_err(|e| e.to_string())?;
-    Ok(format!(".history/{archive_name}"))
+    Ok(outcome)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── git-протокол (graph.md, «Протокол патчу вузла») ──
+
+    /// Вузол із chain-файлами в git-репо з origin; повертає repo і tasks_dir.
+    fn repo_fixture() -> (crate::test_support::TestRepo, String) {
+        let repo = crate::test_support::TestRepo::new();
+        let tasks_root = repo.work.path().join("mt");
+        let node = tasks_root.join("research");
+        fs::create_dir_all(&node).unwrap();
+        for name in ["task.md", "a.md", "run_001.md", "fact_001.md"] {
+            fs::write(node.join(name), "---\nschema_version: 1\n---\n").unwrap();
+        }
+        crate::test_support::commit_all(repo.work.path(), "add node");
+        crate::test_support::push_head(repo.work.path(), "refs/heads/main");
+        let tasks_dir = tasks_root.to_string_lossy().into_owned();
+        (repo, tasks_dir)
+    }
+
+    fn in_main(repo: &crate::test_support::TestRepo, path: &str) -> bool {
+        let sha = crate::git::GitRepository::open(repo.work.path())
+            .unwrap()
+            .resolve_ref("refs/remotes/origin/main")
+            .unwrap();
+        crate::git::GitRepository::open(repo.work.path())
+            .unwrap()
+            .read_blob_at_commit(&sha, path)
+            .is_ok()
+    }
+
+    #[test]
+    fn invalidate_publishes_archive_move_to_main() {
+        let (repo, tasks) = repo_fixture();
+        assert!(in_main(&repo, "mt/research/fact_001.md"));
+
+        invalidate(&tasks, "research", false).unwrap();
+
+        // Chain зник із топології, але лишився в history/ — і те, і те в main.
+        assert!(!in_main(&repo, "mt/research/fact_001.md"), "chain прибрано");
+        assert!(in_main(&repo, "mt/research/task.md"), "контракт лишився");
+        let sha = crate::git::GitRepository::open(repo.work.path())
+            .unwrap()
+            .resolve_ref("refs/remotes/origin/main")
+            .unwrap();
+        let archived = crate::test_support::remote_refs(repo.work.path());
+        assert!(!archived.is_empty(), "main існує: {sha}");
+        // Архів під history/<ts>-invalidate/ — знаходимо перебором дерева.
+        let hist = repo.work.path().join("mt/research/history");
+        let any_archived = fs::read_dir(&hist)
+            .unwrap()
+            .flatten()
+            .any(|e| e.path().join("fact_001.md").is_file());
+        assert!(any_archived, "архів на диску");
+    }
+
+    #[test]
+    fn kill_publishes_subtree_removal_to_main() {
+        let (repo, tasks) = repo_fixture();
+        kill(&tasks, "research").unwrap();
+
+        assert!(!in_main(&repo, "mt/research/task.md"), "вузол зник із main");
+        assert!(!in_main(&repo, "mt/research/fact_001.md"));
+        // Локальний архів лишається на машині, але топології не засмічує.
+        assert!(repo.work.path().join("mt/.history").is_dir());
+    }
+
+    #[test]
+    fn lifecycle_works_without_git_repo() {
+        // Fail-open, як і spawn: на голому дереві мутація лишається локальною.
+        let tmp = fixture();
+        let root = tmp.path().to_string_lossy().into_owned();
+        assert!(invalidate(&root, "research", true).is_ok());
+    }
 
     fn fixture() -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
