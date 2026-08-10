@@ -33,10 +33,14 @@ pub fn run_verdict(args: VerdictArgs, json: bool) -> Result<(), String> {
         &args.reason,
         false,
     )?;
-    emit(json, &serde_json::json!({ "audit_result_file": file }), |_| {
-        let verdict = if args.success { "success" } else { "failed" };
-        println!("audit verdict ({verdict}): {file}");
-    });
+    emit(
+        json,
+        &serde_json::json!({ "audit_result_file": file }),
+        |_| {
+            let verdict = if args.success { "success" } else { "failed" };
+            println!("audit verdict ({verdict}): {file}");
+        },
+    );
     Ok(())
 }
 
@@ -55,9 +59,13 @@ pub fn run_clarify(args: ClarifyArgs, json: bool) -> Result<(), String> {
     let node_path = resolve_node_path(args.name, &tasks_dir)?;
     let actor = args.actor.unwrap_or_else(|| "auditor".to_string());
     let file = audit::clarification(&tasks_dir, &node_path, &actor, &args.question)?;
-    emit(json, &serde_json::json!({ "clarification_file": file }), |_| {
-        println!("clarification: {file}");
-    });
+    emit(
+        json,
+        &serde_json::json!({ "clarification_file": file }),
+        |_| {
+            println!("clarification: {file}");
+        },
+    );
     Ok(())
 }
 

@@ -483,7 +483,9 @@ fn publish_spawn(
         return Ok(());
     };
     let config = crate::config::merge_config(
-        fs::read_to_string(repo_root.join(".mt.json")).ok().as_deref(),
+        fs::read_to_string(repo_root.join(".mt.json"))
+            .ok()
+            .as_deref(),
     );
 
     let mut changes: Vec<crate::publish::FileChange> = Vec::new();

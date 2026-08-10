@@ -78,8 +78,8 @@ pub fn reconcile_after_rerun(tasks_dir: &str, node_path: &str) -> Result<Vec<Str
     let Some(previous) = latest_archived_fact(&dir) else {
         return Ok(Vec::new()); // вузол не інвалідували — нема з чим звіряти
     };
-    let current = fs::read_to_string(dir.join(format!("fact_{nnn:03}.md")))
-        .map_err(|e| e.to_string())?;
+    let current =
+        fs::read_to_string(dir.join(format!("fact_{nnn:03}.md"))).map_err(|e| e.to_string())?;
     if fact_digest(&current) == fact_digest(&previous) {
         return Ok(Vec::new()); // результат той самий — нащадки чинні
     }
@@ -189,7 +189,9 @@ fn publish_mutation(
     }
 
     let config = crate::config::merge_config(
-        fs::read_to_string(repo_root.join(".mt.json")).ok().as_deref(),
+        fs::read_to_string(repo_root.join(".mt.json"))
+            .ok()
+            .as_deref(),
     );
     let outcome = crate::publish::publish_lifecycle(
         &repo_root,

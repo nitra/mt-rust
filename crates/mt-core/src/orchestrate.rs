@@ -91,7 +91,8 @@ pub fn run_auto(tasks_dir: &str, concurrency: usize) -> Result<Vec<AutoResult>, 
     let mut skip: HashSet<String> = HashSet::new();
     let mut in_flight: HashSet<String> = HashSet::new();
     let concurrency = concurrency.max(1);
-    let (tx, rx) = std::sync::mpsc::channel::<(String, Result<crate::runner::RunOutcome, String>)>();
+    let (tx, rx) =
+        std::sync::mpsc::channel::<(String, Result<crate::runner::RunOutcome, String>)>();
 
     loop {
         // Rescan на кожній ітерації — не марнотратство, а і є backfill:

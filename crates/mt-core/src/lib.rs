@@ -1040,7 +1040,9 @@ pub fn scan_tasks_with_claims(
         return Ok(nodes);
     };
     let config = config::merge_config(
-        fs::read_to_string(repo_root.join(".mt.json")).ok().as_deref(),
+        fs::read_to_string(repo_root.join(".mt.json"))
+            .ok()
+            .as_deref(),
     );
     let grace = config
         .get("claim_grace_sec")
@@ -1830,10 +1832,7 @@ mod tests {
     #[test]
     fn no_trigger_on_healthy_node() {
         let runs: Vec<_> = (1..=2).map(failed_run).collect();
-        let files: Vec<(&str, &str)> = runs
-            .iter()
-            .map(|(n, c)| (n.as_str(), c.as_str()))
-            .collect();
+        let files: Vec<(&str, &str)> = runs.iter().map(|(n, c)| (n.as_str(), c.as_str())).collect();
         // streak 2 < 3+1 → ще ретраїмо.
         assert!(reason_for(&files, serde_json::json!({})).is_none());
     }
@@ -1841,10 +1840,7 @@ mod tests {
     #[test]
     fn trigger_execution_ladder_exhausted() {
         let runs: Vec<_> = (1..=4).map(failed_run).collect();
-        let files: Vec<(&str, &str)> = runs
-            .iter()
-            .map(|(n, c)| (n.as_str(), c.as_str()))
-            .collect();
+        let files: Vec<(&str, &str)> = runs.iter().map(|(n, c)| (n.as_str(), c.as_str())).collect();
         // agent_retry_max 3 + engineer_retry_max 1 = 4.
         let reason = reason_for(&files, serde_json::json!({})).expect("має спрацювати");
         assert!(reason.contains("драбину виконання"), "got: {reason}");
@@ -1864,23 +1860,17 @@ mod tests {
     #[test]
     fn trigger_total_budget_exceeded() {
         let runs: Vec<_> = (1..=2).map(failed_run).collect();
-        let files: Vec<(&str, &str)> = runs
-            .iter()
-            .map(|(n, c)| (n.as_str(), c.as_str()))
-            .collect();
+        let files: Vec<(&str, &str)> = runs.iter().map(|(n, c)| (n.as_str(), c.as_str())).collect();
         // 2 × 100s > 150s.
-        let reason =
-            reason_for(&files, serde_json::json!({"budget_total_sec": 150})).expect("має спрацювати");
+        let reason = reason_for(&files, serde_json::json!({"budget_total_sec": 150}))
+            .expect("має спрацювати");
         assert!(reason.contains("сумарний бюджет"), "got: {reason}");
     }
 
     #[test]
     fn total_budget_trigger_is_opt_in() {
         let runs: Vec<_> = (1..=2).map(failed_run).collect();
-        let files: Vec<(&str, &str)> = runs
-            .iter()
-            .map(|(n, c)| (n.as_str(), c.as_str()))
-            .collect();
+        let files: Vec<(&str, &str)> = runs.iter().map(|(n, c)| (n.as_str(), c.as_str())).collect();
         // Без budget_total_sec третій тригер неактивний (спека: опційний).
         assert!(reason_for(&files, serde_json::json!({})).is_none());
     }
