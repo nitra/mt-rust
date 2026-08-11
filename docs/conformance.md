@@ -17,7 +17,7 @@
 | Мілстоун | Стан | Головне, чого бракує |
 | --- | --- | --- |
 | M0 — dogfood ядра | цикл замкнено | recurrence; secrets broker; телеметрія вартості |
-| M1 — agent-server | значною мірою | backpressure за спекою, глибокий реплей |
+| M1 — agent-server | ✅ закрито | — |
 | M2 — mission control | частково | матеріалізація підпису в `## Approvals`, персистентний store і auth, реальний push-транспорт, handoff між машинами через relay, presence |
 | M3 — dashboard і поверхні | не починався | surface-профілі, MCP-сервери, preview/`ContextSelected`, `client_kind: mt-dashboard` |
 | M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |
@@ -64,8 +64,8 @@
 | Envelope + Event v4 (усі варіанти, forward-compat) | РЕАЛІЗОВАНО | `agent-protocol/envelope.rs` | — |
 | Хендшейк, `lang`, exact version check | РЕАЛІЗОВАНО | `agent-protocol/handshake.rs` | — |
 | Ed25519: approvals + transfers | РЕАЛІЗОВАНО | `agent-protocol/approvals.rs`, `transfers.rs` | — |
-| Сесії: журнал, seq, відновлення | РЕАЛІЗОВАНО | `agent-server/session.rs` | Глибокий реплей із run ref (поза буфером) |
-| WS-транспорт, capability-фільтр | ЧАСТКОВО | `agent-server/ws.rs` | Backpressure за спекою (скидання лише ефемерних + disconnect), ліміт кадру 2 MB |
+| Сесії: журнал, seq, відновлення, глибокий реплей | РЕАЛІЗОВАНО | `agent-server/session.rs` `replay_from`/`replay_from_disk`, буфер `SESSION_BUFFER` | — |
+| WS-транспорт, capability-фільтр, backpressure | РЕАЛІЗОВАНО | `agent-server/ws.rs` (наздоганяння журнальованих на `Lagged`, disconnect з `Error`, `MAX_FRAME_BYTES`) | — |
 | Discovery / single-instance | ЧАСТКОВО | `agent-server/discovery.rs` | Живої перевірки stale-lock немає |
 | Інтерактивний run = run вузла | РЕАЛІЗОВАНО | `agent-server/graph.rs` | Інтерактивні політики (`progress_timeout_sec`), телеметрія ходів |
 | Handoff між хостами | ЧАСТКОВО | `agent-server/graph.rs`, `ws.rs` | Немає `HandoffRequest` як події й доставки через relay; немає checkpoint-режиму |

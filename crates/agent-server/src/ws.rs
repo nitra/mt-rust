@@ -189,8 +189,14 @@ pub async fn serve(
     Ok((local_addr, handle))
 }
 
+/// Ліміт кадру — 2 MB, спільний із relay (runtime.md). Без нього один
+/// великий diff чи прев'ю від клієнта міг би роздути памʼять хоста.
+const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
+
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
-    ws.on_upgrade(move |socket| client_connection(socket, state))
+    ws.max_message_size(MAX_FRAME_BYTES)
+        .max_frame_size(MAX_FRAME_BYTES)
+        .on_upgrade(move |socket| client_connection(socket, state))
 }
 
 async fn send_json<T: Serialize>(socket: &mut WebSocket, value: &T) -> Result<(), axum::Error> {
@@ -257,8 +263,12 @@ async fn client_connection(mut socket: WebSocket, state: Arc<AppState>) {
         return;
     }
 
+    // Останній надісланий seq — точка, з якої наздоганяємо клієнта при
+    // backpressure. Оновлюється і на реплеї, і на живих подіях.
+    let mut last_sent_seq: Option<u64> = None;
     if let Some(from) = hello.want_replay_from {
         for envelope in state.sessions.replay_from(from) {
+            last_sent_seq = Some(envelope.seq);
             if allowed(&envelope.event, &hello.client_capabilities)
                 && send_json(&mut socket, &envelope).await.is_err()
             {
@@ -286,14 +296,48 @@ async fn client_connection(mut socket: WebSocket, state: Arc<AppState>) {
             },
             update = updates.recv() => match update {
                 Ok(envelope) => {
+                    last_sent_seq = Some(envelope.seq);
                     if allowed(&envelope.event, &hello.client_capabilities)
                         && send_json(&mut socket, &envelope).await.is_err()
                     {
                         break;
                     }
                 }
-                // Випав із буфера — журнальовані події клієнт добере реплеєм.
-                Err(broadcast::error::RecvError::Lagged(_)) => {}
+                // Backpressure (runtime.md): повільний клієнт випав із
+                // broadcast-буфера. Ефемерні події (дельти тексту, прев'ю)
+                // при цьому втрачати можна — вони не журналяться; а от
+                // журнальовані **доставляються завжди**, інакше клієнт
+                // мовчки побачив би діру в стрічці замість помилки.
+                // Тому наздоганяємо їх реплеєм із журналу сесії.
+                Err(broadcast::error::RecvError::Lagged(dropped)) => {
+                    let from = last_sent_seq.map_or(0, |seq| seq + 1);
+                    let missed = state.sessions.replay_from(from);
+                    let mut failed = false;
+                    for envelope in missed {
+                        last_sent_seq = Some(envelope.seq);
+                        if allowed(&envelope.event, &hello.client_capabilities)
+                            && send_json(&mut socket, &envelope).await.is_err()
+                        {
+                            failed = true;
+                            break;
+                        }
+                    }
+                    if failed {
+                        // Черга надсилання не розсмоктується — примусовий
+                        // disconnect із Error; клієнт повернеться реплеєм.
+                        let _ = send_json(
+                            &mut socket,
+                            &Event::Error {
+                                message: format!(
+                                    "backpressure: клієнт відстав на {dropped} подій і не встигає \
+                                     приймати наздоганяння — перепідключіться з want_replay_from"
+                                ),
+                            },
+                        )
+                        .await;
+                        break;
+                    }
+                }
                 Err(broadcast::error::RecvError::Closed) => break,
             },
         }
