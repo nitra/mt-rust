@@ -22,11 +22,10 @@ cat node_modules/@7n/mt/docs/index.md
 | Крейт | Призначення |
 | --- | --- |
 | `mt-core` | Core-бібліотека задачного графу `@7n/mt`: сканування, створення, lifecycle, claims/publish, run-wrapper |
-| `mt` | CLI-бінарник `mt` — тонкий шар над `mt-core` (clap), без napi/subprocess-посередників |
+| `mt` | CLI-бінарник `mt` — тонкий шар над `mt-core` (clap), без napi/subprocess-посередників; включно з `serve` (хост-процес: сесії + orchestrator-роль) і `attach` (інтерактивна сесія вузла) |
 | `agent-protocol` | Протокол подій v4 для `agent-server`: Envelope/Event, хендшейк, Ed25519-підписи approvals |
 | `agent-core` | ACP-клієнт (Agent Client Protocol) — єдиний транспорт AI-викликів до зовнішніх підписочних CLI |
 | `agent-server` | Хост-процес M1: session host протоколу v4 — Envelope/журнал/broadcast, WS-хендшейк, discovery |
-| `agent-cli` | Тонкий клієнт `agent-server`: `serve` (хост-процес) і `attach` (інтерактивна сесія вузла) |
 
 ## Інше в репозиторії
 

@@ -17,7 +17,7 @@
 | Мілстоун | Стан | Головне, чого бракує |
 | --- | --- | --- |
 | M0 — dogfood ядра | цикл замкнено | recurrence; secrets broker; телеметрія вартості |
-| M1 — agent-server | значною мірою | backpressure за спекою, глибокий реплей, злиття `agent-cli` у `mt serve\|attach` |
+| M1 — agent-server | значною мірою | backpressure за спекою, глибокий реплей |
 | M2 — mission control | частково | матеріалізація підпису в `## Approvals`, персистентний store і auth, реальний push-транспорт, handoff між машинами через relay, presence |
 | M3 — dashboard і поверхні | не починався | surface-профілі, MCP-сервери, preview/`ContextSelected`, `client_kind: mt-dashboard` |
 | M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |

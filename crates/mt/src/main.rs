@@ -44,6 +44,10 @@ enum Command {
     Audit(commands::signal::AuditArgs),
     /// Сигнал провалу.
     Failed(commands::signal::FailedArgs),
+    /// Хост-процес: WS-сесії, discovery, orchestrator-роль.
+    Serve(commands::session::ServeArgs),
+    /// Інтерактивна сесія з вузлом через запущений `mt serve`.
+    Attach(commands::session::AttachArgs),
     /// Зупинити виконання піддерева (running-маркери, від листів).
     Stop(commands::lifecycle::StopArgs),
     /// Вердикт аудитора: закриває цикл (`audit-result_NNN.md`).
@@ -91,6 +95,8 @@ fn main() {
         Command::Done(args) => commands::signal::run_done(args, json),
         Command::Audit(args) => commands::signal::run_audit(args, json),
         Command::Failed(args) => commands::signal::run_failed(args, json),
+        Command::Serve(args) => commands::session::run_serve_cmd(args, json),
+        Command::Attach(args) => commands::session::run_attach_cmd(args, json),
         Command::Stop(args) => commands::lifecycle::run_stop(args, json),
         Command::Verdict(args) => commands::audit::run_verdict(args, json),
         Command::Clarify(args) => commands::audit::run_clarify(args, json),
