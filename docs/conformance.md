@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | M0 — dogfood ядра | цикл замкнено | recurrence; secrets broker; телеметрія вартості |
 | M1 — agent-server | ✅ закрито | — |
-| M2 — mission control | частково | матеріалізація підпису в `## Approvals`, персистентний store і auth, реальний push-транспорт, handoff між машинами через relay, presence |
+| M2 — mission control | частково | персистентний store і auth, реальний push-транспорт, handoff між машинами через relay, presence |
 | M3 — dashboard і поверхні | не починався | surface-профілі, MCP-сервери, preview/`ContextSelected`, `client_kind: mt-dashboard` |
 | M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |
 | M5 — мета-цикл retro | не починався | увесь рушій; дані для нього вже накопичуються |
@@ -69,7 +69,7 @@
 | Discovery / single-instance | ЧАСТКОВО | `agent-server/discovery.rs` | Живої перевірки stale-lock немає |
 | Інтерактивний run = run вузла | РЕАЛІЗОВАНО | `agent-server/graph.rs` | Інтерактивні політики (`progress_timeout_sec`), телеметрія ходів |
 | Handoff між хостами | ЧАСТКОВО | `agent-server/graph.rs`, `ws.rs` | Немає `HandoffRequest` як події й доставки через relay; немає checkpoint-режиму |
-| Approvals-гейт mid-run | ЧАСТКОВО | `agent-server/approvals_gate.rs` | **Немає матеріалізації підпису в `## Approvals`** — це блокує demo-критерій M2 |
+| Approvals-гейт mid-run + матеріалізація | РЕАЛІЗОВАНО | `agent-server/approvals_gate.rs` `ApprovalRecord::to_yaml_line`; запис — `ws.rs` → `InteractiveRun::add_approval` → `run_NNN.md` | — |
 | ACP-транспорт | РЕАЛІЗОВАНО | `agent-core/acp.rs` | `mcpServers` жорстко порожній |
 | Orchestrator-роль у agent-server + wake | РЕАЛІЗОВАНО | `agent-server/orchestrator.rs` `Wake`/`Orchestrator::tick`; relay push → `AppState::wake_orchestrator` | — |
 | `client_kind: mt-dashboard` | ВІДСУТНЄ | — | Типи подій є, ніхто не емітить |

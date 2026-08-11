@@ -31,6 +31,7 @@ dependencies = [
  "agent-protocol",
  "async-trait",
  "axum",
+ "base64",
  "chrono",
  "futures",
  "mt-core",
