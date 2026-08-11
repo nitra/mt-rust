@@ -12,6 +12,7 @@
 pub mod approvals_gate;
 pub mod discovery;
 pub mod graph;
+pub mod orchestrator;
 pub mod relay_client;
 pub mod runner;
 pub mod session;

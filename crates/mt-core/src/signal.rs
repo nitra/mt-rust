@@ -245,7 +245,7 @@ fn check_contract_unchanged(dir: &Path) -> Result<(), String> {
 
 /// Політика аудиту вузла: frontmatter `audit:` task.md (required|optional|off).
 fn audit_policy(dir: &Path) -> String {
-    fs::read_to_string(dir.join("task.md"))
+    let declared = fs::read_to_string(dir.join("task.md"))
         .ok()
         .map(|c| parse_front_matter(&c))
         .and_then(|fm| {
@@ -253,7 +253,44 @@ fn audit_policy(dir: &Path) -> String {
                 .and_then(serde_json::Value::as_str)
                 .map(String::from)
         })
-        .unwrap_or_else(|| "optional".to_string())
+        .unwrap_or_else(|| "optional".to_string());
+
+    // `audit_on_patch` (graph.md, тригери аудиту): вузол, який пропатчили й
+    // перезапустили, проходить аудит навіть якщо в контракті стоїть
+    // `optional`. Патч змінює саме те, за чим оцінювали результат, тож
+    // довіра до попереднього «зійшло і так» не переноситься.
+    // `off` не піднімається: вимкнений аудит — свідоме рішення автора.
+    if declared == "optional" && was_patched(dir) && audit_on_patch_enabled(dir) {
+        return "required".to_string();
+    }
+    declared
+}
+
+/// Чи вузол колись інвалідували — у ньому є архів `history/*-invalidate/`.
+fn was_patched(dir: &Path) -> bool {
+    fs::read_dir(dir.join("history"))
+        .map(|entries| {
+            entries.flatten().any(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .ends_with("-invalidate")
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn audit_on_patch_enabled(dir: &Path) -> bool {
+    let Some(project_root) = dir.parent().and_then(Path::parent) else {
+        return false;
+    };
+    crate::config::merge_config(
+        fs::read_to_string(project_root.join(".mt.json"))
+            .ok()
+            .as_deref(),
+    )
+    .get("audit_on_patch")
+    .and_then(serde_json::Value::as_bool)
+    .unwrap_or(true)
 }
 
 fn signal_success(
@@ -637,6 +674,40 @@ mod tests {
         let err = done(&root, "solo", "human").unwrap_err();
         assert!(err.contains("exit 3"));
         assert!(!tmp.path().join("solo/run_001.md").exists());
+    }
+
+    #[test]
+    fn patched_node_requires_audit_even_when_optional() {
+        // graph.md, тригер `audit_on_patch`: патч змінює саме те, за чим
+        // оцінювали результат, тож попереднє «зійшло і так» не переноситься.
+        let tmp = tempfile::tempdir().unwrap();
+        node(tmp.path(), "solo", TASK_WITH_CHECK); // audit не вказано → optional
+        let dir = tmp.path().join("solo");
+        let root = tmp.path().to_string_lossy().into_owned();
+        write_fact(&root, "solo", "Зроблено.", None).unwrap();
+        assert!(done(&root, "solo", "agent").is_ok(), "до патчу — optional");
+
+        // Слід інвалідації робить аудит обов'язковим.
+        fs::create_dir_all(dir.join("history/20260810-120000-invalidate")).unwrap();
+        write_fact(&root, "solo", "Перероблено.", None).unwrap();
+        assert!(done(&root, "solo", "agent")
+            .unwrap_err()
+            .contains("приймає лише сигнал audit"));
+        assert!(audit(&root, "solo", "agent").is_ok());
+    }
+
+    #[test]
+    fn audit_off_is_not_raised_by_patch() {
+        // Вимкнений аудит — свідоме рішення автора контракту, патч його не
+        // скасовує.
+        let tmp = tempfile::tempdir().unwrap();
+        let task = TASK_WITH_CHECK.replace("---\n\n## Task", "audit: off\n---\n\n## Task");
+        node(tmp.path(), "solo", &task);
+        let dir = tmp.path().join("solo");
+        fs::create_dir_all(dir.join("history/20260810-120000-invalidate")).unwrap();
+        let root = tmp.path().to_string_lossy().into_owned();
+        write_fact(&root, "solo", "Зроблено.", None).unwrap();
+        assert!(done(&root, "solo", "agent").is_ok());
     }
 
     #[test]

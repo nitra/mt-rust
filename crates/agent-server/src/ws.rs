@@ -39,6 +39,11 @@ pub struct AppState {
     /// Гейт підписаних approvals (access.md); pubkey-кеш наповнює relay-міст.
     pub approvals: Arc<ApprovalGate>,
     graph: Option<GraphConfig>,
+    /// Ручка пробудження orchestrator-ролі: relay push «є нові події у
+    /// задачі X» має будити хост негайно, а не чекати fallback-таймера
+    /// (runtime.md, «Wake: push замість polling»). `None` — orchestrator
+    /// у цьому процесі не запущений.
+    wake: std::sync::Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>>,
     /// Активні інтерактивні run-и за node-ключем кімнати. Git-операції
     /// швидкі й локальні — виконуються під локом (spawn_blocking — TODO
     /// разом із віддаленими remote).
@@ -55,6 +60,24 @@ impl AppState {
         )
     }
 
+    /// Реєструє ручку пробудження orchestrator-ролі.
+    pub fn set_wake(&self, signaller: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        if let Ok(mut slot) = self.wake.lock() {
+            *slot = Some(signaller);
+        }
+    }
+
+    /// Будить orchestrator-роль, якщо вона є в цьому процесі. Тихо
+    /// нічого не робить інакше — relay-міст не має знати, чи хост
+    /// виконує ще й оркестрацію.
+    pub fn wake_orchestrator(&self) {
+        if let Ok(slot) = self.wake.lock() {
+            if let Some(flag) = slot.as_ref() {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+    }
+
     /// Конструктор зі спільними частинами — коли sessions/gate потрібні
     /// runner-фабриці ДО створення AppState (approval-гейт тулів).
     pub fn from_parts(
@@ -68,6 +91,7 @@ impl AppState {
             runner,
             token,
             approvals,
+            wake: std::sync::Mutex::new(None),
             graph: None,
             runs: tokio::sync::Mutex::new(HashMap::new()),
         }

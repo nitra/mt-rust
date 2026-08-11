@@ -17,7 +17,7 @@
 | Мілстоун | Стан | Головне, чого бракує |
 | --- | --- | --- |
 | M0 — dogfood ядра | цикл замкнено | recurrence; secrets broker; телеметрія вартості |
-| M1 — agent-server | значною мірою | orchestrator-роль і wake, backpressure за спекою, глибокий реплей, злиття `agent-cli` у `mt serve\|attach` |
+| M1 — agent-server | значною мірою | backpressure за спекою, глибокий реплей, злиття `agent-cli` у `mt serve\|attach` |
 | M2 — mission control | частково | матеріалізація підпису в `## Approvals`, персистентний store і auth, реальний push-транспорт, handoff між машинами через relay, presence |
 | M3 — dashboard і поверхні | не починався | surface-профілі, MCP-сервери, preview/`ContextSelected`, `client_kind: mt-dashboard` |
 | M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |
@@ -46,13 +46,13 @@
 | Composite-агрегація вгору | РЕАЛІЗОВАНО | `signal.rs` `propagate_composite` | — |
 | Протокол spawn | РЕАЛІЗОВАНО | `spawn.rs` `spawn_approve`/`publish_spawn`, `publish.rs` `publish_lifecycle` | — (`plan_reject_max` закрито через `unresolvable`) |
 | Git-протокол `invalidate`/`kill` + re-run семантика | РЕАЛІЗОВАНО | `lifecycle.rs` `publish_mutation`/`stop`/`reconcile_after_rerun`; CLI — `mt stop` | — |
-| Оркестрація `run --auto` | ЧАСТКОВО | `orchestrate.rs` `run_auto` | Continuous backfill і rescan на кожній події — є; лишається wake (подієвий запуск) — orchestrator-роль |
+| Оркестрація `run --auto` | РЕАЛІЗОВАНО | `orchestrate.rs` `run_auto`; подієвий запуск — `agent-server/orchestrator.rs` | — |
 | Worktree lifecycle | РЕАЛІЗОВАНО | `worktree.rs` | — |
 | Git-межа (`gix` + вузький shim) | РЕАЛІЗОВАНО | `git/` | — |
 | Аудит-цикл: вердикт, clarification, amend, `audit_failed_streak` | РЕАЛІЗОВАНО | `audit.rs`; CLI — `mt verdict`/`mt clarify`/`mt amend` | — |
-| Аудитор як актор (`mt run --actor auditor`, `audit_model`) | ЧАСТКОВО | `audit.rs` `run_auditor`/`build_auditor_prompt`; `runner.rs` `run_single_phase` | Тригери `audit_schedule_days`/`audit_on_patch` — потребують orchestrator-ролі (хвиля 3) |
+| Аудитор як актор + тригери аудиту | РЕАЛІЗОВАНО | `audit.rs` `run_auditor`; черга — `orchestrator.rs` `audit_queue`; `audit_on_patch` — `signal.rs` `audit_policy` | — |
 | EngineerAgent | РЕАЛІЗОВАНО | `runner.rs` `Actor`/`build_engineer_prompt`/`full_run_history`; CLI — `mt run --actor engineer` | — (GraphPatch реалізовано як дозволені втручання через штатні команди, окремого артефакту спека не задає) |
-| `unresolvable` (3 тригери + алерт) | ЧАСТКОВО | `lib.rs` `unresolvable_reason`/`write_unresolvable`; тригери — `runner.rs` (перед комітом), `spawn.rs` `spawn_reject` | Алерт власнику (relay push) — потребує orchestrator-ролі й relay-шляху (хвиля 3) |
+| `unresolvable` (3 тригери + алерт) | РЕАЛІЗОВАНО | `lib.rs` `unresolvable_reason`/`write_unresolvable`; алерт — `agent-server/orchestrator.rs` `pending_alerts` | — (доставка алерту назовні — push-транспорт M2) |
 | Recurrence | ВІДСУТНЄ | — | Уся глава `recurrence.md` |
 | Secrets broker / sandbox `skill_profiles` | ВІДСУТНЄ | — | `a.md.secrets` не інжектиться, allowlist немає |
 | `.mt.json` — дефолти для реалізованого | РЕАЛІЗОВАНО | `config.rs` `config_defaults` | — (ключі нереалізованих фіч свідомо без дефолтів, див. «Закриті питання») |
@@ -71,7 +71,7 @@
 | Handoff між хостами | ЧАСТКОВО | `agent-server/graph.rs`, `ws.rs` | Немає `HandoffRequest` як події й доставки через relay; немає checkpoint-режиму |
 | Approvals-гейт mid-run | ЧАСТКОВО | `agent-server/approvals_gate.rs` | **Немає матеріалізації підпису в `## Approvals`** — це блокує demo-критерій M2 |
 | ACP-транспорт | РЕАЛІЗОВАНО | `agent-core/acp.rs` | `mcpServers` жорстко порожній |
-| Orchestrator-роль у agent-server + wake | ВІДСУТНЄ | — | Скан/dispatch/GC/алерти при wake |
+| Orchestrator-роль у agent-server + wake | РЕАЛІЗОВАНО | `agent-server/orchestrator.rs` `Wake`/`Orchestrator::tick`; relay push → `AppState::wake_orchestrator` | — |
 | `client_kind: mt-dashboard` | ВІДСУТНЄ | — | Типи подій є, ніхто не емітить |
 | Surface-профілі, MCP, preview, `ContextSelected` | ВІДСУТНЄ | — | Уся глава `surfaces.md` |
 
