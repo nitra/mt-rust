@@ -156,8 +156,7 @@ impl Orchestrator {
         let mut out = Vec::new();
         let mut stack: Vec<&mt_core::TaskNode> = nodes.iter().collect();
         while let Some(node) = stack.pop() {
-            if node.state == mt_core::TaskState::Unresolvable
-                && !self.alerted.contains(&node.path)
+            if node.state == mt_core::TaskState::Unresolvable && !self.alerted.contains(&node.path)
             {
                 self.alerted.insert(node.path.clone());
                 out.push(node.path.clone());
@@ -312,7 +311,10 @@ mod tests {
         std::fs::write(&wake_file, "").unwrap();
 
         let mut wake = Wake::new(tmp.path(), Duration::from_secs(3600));
-        assert!(!wake.should_wake_now(), "наявний файл сам по собі — не подія");
+        assert!(
+            !wake.should_wake_now(),
+            "наявний файл сам по собі — не подія"
+        );
 
         // git hook торкається файлу після мерджу.
         std::thread::sleep(Duration::from_millis(10));

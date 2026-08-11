@@ -59,7 +59,7 @@ export class InMemoryStore {
    * @param {{ email: string, displayName?: string }} params дані акаунта
    * @returns {{account_id: string, email: string, display_name: string}} акаунт
    */
-  createAccount({ email, displayName = '' }) {
+  async createAccount({ email, displayName = '' }) {
     const account = { account_id: randomUUID(), email, display_name: displayName }
     this.accounts.set(account.account_id, account)
     return account
@@ -70,7 +70,7 @@ export class InMemoryStore {
    * @param {string} email email акаунта
    * @returns {{account_id: string, email: string, display_name: string} | null} акаунт або null
    */
-  accountByEmail(email) {
+  async accountByEmail(email) {
     for (const account of this.accounts.values()) if (account.email === email) return account
     return null
   }
@@ -85,7 +85,7 @@ export class InMemoryStore {
    * @returns {{device_id: string, device_token: string}} ідентифікатор і токен пристрою
    * @throws {Error} pubkey не hex-32
    */
-  registerDevice(accountId, { name, role, pubkey }) {
+  async registerDevice(accountId, { name, role, pubkey }) {
     if (!PUBKEY_RE.test(pubkey ?? '')) {
       throw new Error('registerDevice відхилено: pubkey має бути hex Ed25519 (32 байти)')
     }
@@ -107,7 +107,7 @@ export class InMemoryStore {
    * @param {string} token device_token
    * @returns {object | null} запис пристрою або null
    */
-  deviceByToken(token) {
+  async deviceByToken(token) {
     for (const device of this.devices.values()) {
       if (tokenEquals(device.device_token, token)) return device
     }
@@ -121,7 +121,7 @@ export class InMemoryStore {
    * @param {{ projectName?: string, remoteUrl?: string }} [meta] метадані
    * @returns {object} запис задачі
    */
-  createTask(rootNodeHash, ownerAccount, meta = {}) {
+  async createTask(rootNodeHash, ownerAccount, meta = {}) {
     const task = {
       root_node_hash: rootNodeHash,
       owner_account: ownerAccount,
@@ -140,7 +140,7 @@ export class InMemoryStore {
    * @param {string} accountId акаунт
    * @returns {string | null} роль або null (не учасник)
    */
-  memberRole(rootNodeHash, accountId) {
+  async memberRole(rootNodeHash, accountId) {
     return this.members.get(rootNodeHash)?.get(accountId) ?? null
   }
 
@@ -151,8 +151,30 @@ export class InMemoryStore {
    * @param {string} role нова роль
    * @returns {void}
    */
-  setMemberRole(rootNodeHash, accountId, role) {
+  async setMemberRole(rootNodeHash, accountId, role) {
+    // Upsert у межах наявної задачі: accept-запрошення додає учасника, а
+    // PATCH role змінює наявного — одна операція на обидва шляхи.
     this.members.get(rootNodeHash)?.set(accountId, role)
+  }
+
+  /**
+   * Акаунт за id (перевірка адресата запрошення).
+   * @param {string} accountId акаунт
+   * @returns {Promise<object | null>} акаунт або null
+   */
+  async accountById(accountId) {
+    return this.accounts.get(accountId) ?? null
+  }
+
+  /**
+   * Статус запрошення: accepted | declined | revoked.
+   * @param {string} invitationId id запрошення
+   * @param {string} status новий статус
+   * @returns {Promise<void>} завершення запису
+   */
+  async setInvitationStatus(invitationId, status) {
+    const invitation = this.invitations.get(invitationId)
+    if (invitation) invitation.status = status
   }
 
   /**
@@ -161,7 +183,7 @@ export class InMemoryStore {
    * @param {string} accountId акаунт
    * @returns {void}
    */
-  removeMember(rootNodeHash, accountId) {
+  async removeMember(rootNodeHash, accountId) {
     this.members.get(rootNodeHash)?.delete(accountId)
   }
 
@@ -170,7 +192,7 @@ export class InMemoryStore {
    * @param {string} rootNodeHash кореневий вузол
    * @returns {{account_id: string, role: string}[]} перелік учасників
    */
-  membersOf(rootNodeHash) {
+  async membersOf(rootNodeHash) {
     const members = this.members.get(rootNodeHash)
     if (!members) return []
     return Array.from(members.entries(), ([account_id, role]) => ({ account_id, role }))
@@ -184,7 +206,7 @@ export class InMemoryStore {
    * @param {string} role роль після accept
    * @returns {object} запис запрошення
    */
-  createInvitation(rootNodeHash, fromAccount, toEmail, role) {
+  async createInvitation(rootNodeHash, fromAccount, toEmail, role) {
     const invitation = {
       invitation_id: randomUUID(),
       root_node_hash: rootNodeHash,
@@ -203,7 +225,7 @@ export class InMemoryStore {
    * @param {string} invitationId id запрошення
    * @returns {object | null} запис або null
    */
-  invitationById(invitationId) {
+  async invitationById(invitationId) {
     return this.invitations.get(invitationId) ?? null
   }
 
@@ -214,7 +236,7 @@ export class InMemoryStore {
    * @param {string} toEmail email запрошеного
    * @returns {object | null} pending-запрошення або null
    */
-  pendingInvitationFor(rootNodeHash, toEmail) {
+  async pendingInvitationFor(rootNodeHash, toEmail) {
     for (const invitation of this.invitations.values()) {
       if (
         invitation.root_node_hash === rootNodeHash &&
@@ -233,11 +255,9 @@ export class InMemoryStore {
    * @param {string} rootNodeHash кореневий вузол
    * @returns {{device_id: string, account_id: string, pubkey: string}[]} pubkey-и
    */
-  pubkeysFor(rootNodeHash) {
+  async pubkeysFor(rootNodeHash) {
     const approvers = new Set(
-      this.membersOf(rootNodeHash)
-        .filter(m => roleAtLeast(m.role, 'approver'))
-        .map(m => m.account_id)
+      (await this.membersOf(rootNodeHash)).filter(m => roleAtLeast(m.role, 'approver')).map(m => m.account_id)
     )
     return this.devices
       .values()

@@ -66,24 +66,28 @@ let approver
 let ownerPrivateKey
 
 beforeAll(async () => {
-  owner = store.createAccount({ email: 'owner@x' })
-  const viewer = store.createAccount({ email: 'viewer@x' })
-  approver = store.createAccount({ email: 'approver@x' })
-  store.createTask('root-1', owner.account_id)
-  store.setMemberRole('root-1', viewer.account_id, 'viewer')
-  store.setMemberRole('root-1', approver.account_id, 'approver')
+  owner = await store.createAccount({ email: 'owner@x' })
+  const viewer = await store.createAccount({ email: 'viewer@x' })
+  approver = await store.createAccount({ email: 'approver@x' })
+  await store.createTask('root-1', owner.account_id)
+  await store.setMemberRole('root-1', viewer.account_id, 'viewer')
+  await store.setMemberRole('root-1', approver.account_id, 'approver')
   const pair = generateKeyPairSync('ed25519')
   ownerPrivateKey = pair.privateKey
-  hostToken = store.registerDevice(owner.account_id, {
-    name: 'mac',
-    role: 'host',
-    pubkey: pair.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('hex')
-  }).device_token
-  viewerToken = store.registerDevice(viewer.account_id, {
-    name: 'tab',
-    role: 'client',
-    pubkey: fakeKey('tab')
-  }).device_token
+  hostToken = (
+    await store.registerDevice(owner.account_id, {
+      name: 'mac',
+      role: 'host',
+      pubkey: pair.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('hex')
+    })
+  ).device_token
+  viewerToken = (
+    await store.registerDevice(viewer.account_id, {
+      name: 'tab',
+      role: 'client',
+      pubkey: fakeKey('tab')
+    })
+  ).device_token
   server = await startRelayServer(new RelayCore({ store }))
 })
 
@@ -148,17 +152,19 @@ test('membership через WS: invite → accept новим акаунтом', 
   const invited = await roundtrip(socket, { kind: 'invite', root: 'root-1', email: 'new@x', role: 'host' })
   expect(invited).toMatchObject({ kind: 'ok', status: 'pending' })
 
-  const newcomer = store.createAccount({ email: 'new@x' })
-  const token = store.registerDevice(newcomer.account_id, {
-    name: 'new-phone',
-    role: 'client',
-    pubkey: fakeKey('new-phone')
-  }).device_token
+  const newcomer = await store.createAccount({ email: 'new@x' })
+  const token = (
+    await store.registerDevice(newcomer.account_id, {
+      name: 'new-phone',
+      role: 'client',
+      pubkey: fakeKey('new-phone')
+    })
+  ).device_token
   const other = await connect()
   await roundtrip(other, { kind: 'hello', device_token: token })
   const accepted = await roundtrip(other, { kind: 'accept', invitation_id: invited.invitation_id })
   expect(accepted).toEqual({ kind: 'ok', root: 'root-1', role: 'host' })
-  expect(store.memberRole('root-1', newcomer.account_id)).toBe('host')
+  expect(await store.memberRole('root-1', newcomer.account_id)).toBe('host')
   socket.close()
   other.close()
 })
@@ -187,18 +193,20 @@ test('transfer_ownership через WS: без підпису — error, з пі
     signature
   })
   expect(transferred).toEqual({ kind: 'ok', transferred: 'root-1', to_account: approver.account_id })
-  expect(store.memberRole('root-1', approver.account_id)).toBe('owner')
-  expect(store.memberRole('root-1', owner.account_id)).toBe('host')
+  expect(await store.memberRole('root-1', approver.account_id)).toBe('owner')
+  expect(await store.memberRole('root-1', owner.account_id)).toBe('host')
   socket.close()
 })
 
 test('bootstrap_owners через WS: сідинг з owner:-розмітки (новим owner-ом)', async () => {
   // Після transfer вище owner кореня — approver; реєструємо його пристрій.
-  const token = store.registerDevice(approver.account_id, {
-    name: 'approver-mac',
-    role: 'client',
-    pubkey: fakeKey('approver-mac')
-  }).device_token
+  const token = (
+    await store.registerDevice(approver.account_id, {
+      name: 'approver-mac',
+      role: 'client',
+      pubkey: fakeKey('approver-mac')
+    })
+  ).device_token
   const socket = await connect()
   await roundtrip(socket, { kind: 'hello', device_token: token })
   const reply = await roundtrip(socket, {

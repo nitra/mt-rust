@@ -27,8 +27,8 @@ export class RelayCore {
    * @returns {object} запис пристрою
    * @throws {Error} невідомий токен
    */
-  connectDevice(deviceToken) {
-    const device = this.store.deviceByToken(deviceToken)
+  async connectDevice(deviceToken) {
+    const device = await this.store.deviceByToken(deviceToken)
     if (!device) throw new Error('invalid device token')
     device.last_seen = new Date().toISOString()
     return device
@@ -43,8 +43,8 @@ export class RelayCore {
    * @returns {() => void} відписка
    * @throws {Error} не учасник
    */
-  subscribe(device, root, send) {
-    const role = this.store.memberRole(root, device.account_id)
+  async subscribe(device, root, send) {
+    const role = await this.store.memberRole(root, device.account_id)
     if (!role) throw new Error(`subscribe відхилено: акаунт не учасник задачі ${root}`)
     return this.rooms.subscribe(root, { deviceId: device.device_id, send })
   }
@@ -62,15 +62,15 @@ export class RelayCore {
    * @returns {void}
    * @throws {Error} viewer або не учасник
    */
-  clientEnvelope(device, root, envelope) {
-    const role = this.store.memberRole(root, device.account_id)
+  async clientEnvelope(device, root, envelope) {
+    const role = await this.store.memberRole(root, device.account_id)
     if (!role) throw new Error(`envelope відхилено: акаунт не учасник задачі ${root}`)
     if (!roleAtLeast(role, 'approver')) {
       throw new Error('envelope відхилено: роль viewer не шле клієнтські події')
     }
     this.rooms.publish(root, { kind: 'envelope', envelope, from_host: device.role === 'host' })
     // Тип 3 push («потребує уваги») — з роутінгових полів події (push.mjs).
-    this.push?.onEnvelope(root, envelope, device.account_id)
+    await this.push?.onEnvelope(root, envelope, device.account_id)
   }
 
   /**
@@ -82,13 +82,13 @@ export class RelayCore {
    * @returns {object} запис запрошення (status: pending)
    * @throws {Error} не owner
    */
-  invite(ownerAccount, root, { email, role }) {
-    if (this.store.memberRole(root, ownerAccount) !== 'owner') {
+  async invite(ownerAccount, root, { email, role }) {
+    if ((await this.store.memberRole(root, ownerAccount)) !== 'owner') {
       throw new Error('invite відхилено: запрошує лише owner')
     }
-    const invitation = this.store.createInvitation(root, ownerAccount, email, role)
+    const invitation = await this.store.createInvitation(root, ownerAccount, email, role)
     // Тип 2 push «вас запрошено»; незареєстрований email — pending мовчки.
-    this.push?.invited(email, root)
+    await this.push?.invited(email, root)
     return invitation
   }
 
@@ -100,17 +100,17 @@ export class RelayCore {
    * @returns {{root_node_hash: string, role: string}} членство
    * @throws {Error} невідоме/не pending/чужий email
    */
-  accept(invitationId, accountId) {
-    const invitation = this.store.invitationById(invitationId)
+  async accept(invitationId, accountId) {
+    const invitation = await this.store.invitationById(invitationId)
     if (!invitation || invitation.status !== 'pending') {
       throw new Error('accept відхилено: запрошення не існує або вже оброблене')
     }
-    const account = this.store.accounts.get(accountId)
+    const account = await this.store.accountById(accountId)
     if (!account || account.email !== invitation.to_email) {
       throw new Error('accept відхилено: запрошення адресоване іншому акаунту')
     }
-    invitation.status = 'accepted'
-    this.store.setMemberRole(invitation.root_node_hash, accountId, invitation.role)
+    await this.store.setInvitationStatus(invitationId, 'accepted')
+    await this.store.setMemberRole(invitation.root_node_hash, accountId, invitation.role)
     this.rooms.publish(invitation.root_node_hash, {
       kind: 'event',
       event: { type: 'MemberChanged', account_id: accountId, role: invitation.role }
@@ -125,13 +125,13 @@ export class RelayCore {
    * @returns {void}
    * @throws {Error} невідоме/чужий email
    */
-  decline(invitationId, accountId) {
-    const invitation = this.store.invitationById(invitationId)
-    const account = this.store.accounts.get(accountId)
+  async decline(invitationId, accountId) {
+    const invitation = await this.store.invitationById(invitationId)
+    const account = await this.store.accountById(accountId)
     if (!invitation || !account || account.email !== invitation.to_email) {
       throw new Error('decline відхилено: запрошення не існує або адресоване іншому')
     }
-    invitation.status = 'declined'
+    await this.store.setInvitationStatus(invitationId, 'declined')
   }
 
   /**
@@ -147,11 +147,11 @@ export class RelayCore {
    * @returns {void}
    * @throws {Error} не owner / отримувач не учасник / невалідний підпис
    */
-  transferOwnership(root, fromAccount, toAccount, signed) {
-    if (this.store.memberRole(root, fromAccount) !== 'owner') {
+  async transferOwnership(root, fromAccount, toAccount, signed) {
+    if ((await this.store.memberRole(root, fromAccount)) !== 'owner') {
       throw new Error('transfer відхилено: передає лише owner')
     }
-    if (!this.store.memberRole(root, toAccount)) {
+    if (!(await this.store.memberRole(root, toAccount))) {
       throw new Error('transfer відхилено: отримувач не учасник задачі')
     }
     if (signed) {
@@ -160,8 +160,8 @@ export class RelayCore {
         throw new Error('transfer відхилено: підпис акта не пройшов перевірку')
       }
     }
-    this.store.setMemberRole(root, toAccount, 'owner')
-    this.store.setMemberRole(root, fromAccount, 'host')
+    await this.store.setMemberRole(root, toAccount, 'owner')
+    await this.store.setMemberRole(root, fromAccount, 'host')
     this.rooms.publish(root, {
       kind: 'event',
       event: { type: 'MemberChanged', account_id: toAccount, role: 'owner' }
@@ -180,19 +180,19 @@ export class RelayCore {
    * @returns {{ added: string[], invited: string[], kept: string[] }} підсумок за email
    * @throws {Error} не owner
    */
-  bootstrapMembers(ownerAccount, root, entries) {
-    if (this.store.memberRole(root, ownerAccount) !== 'owner') {
+  async bootstrapMembers(ownerAccount, root, entries) {
+    if ((await this.store.memberRole(root, ownerAccount)) !== 'owner') {
       throw new Error('bootstrap відхилено: сідить membership лише owner')
     }
     const result = { added: [], invited: [], kept: [] }
     for (const { email, role = 'owner' } of entries ?? []) {
-      const account = this.store.accountByEmail(email)
+      const account = await this.store.accountByEmail(email)
       if (account) {
-        if (this.store.memberRole(root, account.account_id)) {
+        if (await this.store.memberRole(root, account.account_id)) {
           result.kept.push(email)
           continue
         }
-        this.store.setMemberRole(root, account.account_id, role)
+        await this.store.setMemberRole(root, account.account_id, role)
         this.rooms.publish(root, {
           kind: 'event',
           event: { type: 'MemberChanged', account_id: account.account_id, role }
@@ -200,9 +200,9 @@ export class RelayCore {
         result.added.push(email)
         continue
       }
-      if (!this.store.pendingInvitationFor(root, email)) {
-        this.store.createInvitation(root, ownerAccount, email, role)
-        this.push?.invited(email, root)
+      if (!(await this.store.pendingInvitationFor(root, email))) {
+        await this.store.createInvitation(root, ownerAccount, email, role)
+        await this.push?.invited(email, root)
       }
       result.invited.push(email)
     }
@@ -217,10 +217,10 @@ export class RelayCore {
    * @returns {{device_id: string, account_id: string, pubkey: string}[]} pubkey-и
    * @throws {Error} не учасник
    */
-  pubkeys(device, root) {
-    if (!this.store.memberRole(root, device.account_id)) {
+  async pubkeys(device, root) {
+    if (!(await this.store.memberRole(root, device.account_id))) {
       throw new Error('pubkeys відхилено: акаунт не учасник задачі')
     }
-    return this.store.pubkeysFor(root)
+    return await this.store.pubkeysFor(root)
   }
 }

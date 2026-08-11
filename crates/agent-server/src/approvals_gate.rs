@@ -285,11 +285,17 @@ mod tests {
         let gate = ApprovalGate::default();
         let device = Uuid::from_u128(1);
         gate.set_pubkeys(vec![(device, key().verifying_key())]);
-        let receiver = gate.register("req-1", "room-1", Uuid::from_u128(9), "edit_file config/prod.yml");
+        let receiver = gate.register(
+            "req-1",
+            "room-1",
+            Uuid::from_u128(9),
+            "edit_file config/prod.yml",
+        );
 
         let signature = signed(&gate, "req-1", true, &key());
         assert_eq!(
-            gate.resolve("req-1", true, &signature, Some(device)).map(|r| r.approved),
+            gate.resolve("req-1", true, &signature, Some(device))
+                .map(|r| r.approved),
             Ok(true)
         );
         assert_eq!(receiver.await, Ok(true));
@@ -302,7 +308,12 @@ mod tests {
         let gate = ApprovalGate::default();
         let device = Uuid::from_u128(1);
         gate.set_pubkeys(vec![(device, key().verifying_key())]);
-        let receiver = gate.register("req-1", "room-1", Uuid::from_u128(9), "edit_file config/prod.yml");
+        let receiver = gate.register(
+            "req-1",
+            "room-1",
+            Uuid::from_u128(9),
+            "edit_file config/prod.yml",
+        );
 
         // Невідомий пристрій.
         let foreign = signed(&gate, "req-1", true, &SigningKey::from_bytes(&[7u8; 32]));
@@ -322,7 +333,8 @@ mod tests {
         // Валідна відповідь після відмов досі можлива.
         let signature = signed(&gate, "req-1", false, &key());
         assert_eq!(
-            gate.resolve("req-1", false, &signature, Some(device)).map(|r| r.approved),
+            gate.resolve("req-1", false, &signature, Some(device))
+                .map(|r| r.approved),
             Ok(false)
         );
         assert_eq!(receiver.await, Ok(false));
@@ -333,7 +345,12 @@ mod tests {
     #[tokio::test]
     async fn unsigned_policy_depends_on_require_signed() {
         let gate = ApprovalGate::default();
-        let receiver = gate.register("req-1", "room-1", Uuid::from_u128(9), "edit_file config/prod.yml");
+        let receiver = gate.register(
+            "req-1",
+            "room-1",
+            Uuid::from_u128(9),
+            "edit_file config/prod.yml",
+        );
         assert_eq!(
             gate.resolve("req-1", true, &[], None).map(|r| r.approved),
             Ok(true)

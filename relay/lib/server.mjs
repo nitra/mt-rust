@@ -25,9 +25,9 @@ const FRAME_LIMIT = 2 * 1024 * 1024
  * @param {(frame: object) => void} send доставка кадрів клієнту
  * @returns {void}
  */
-function handleFrame(core, state, frame, send) {
+async function handleFrame(core, state, frame, send) {
   if (frame.kind === 'hello') {
-    state.device = core.connectDevice(frame.device_token)
+    state.device = await core.connectDevice(frame.device_token)
     send({ kind: 'ok', device_id: state.device.device_id })
     return
   }
@@ -35,22 +35,22 @@ function handleFrame(core, state, frame, send) {
   switch (frame.kind) {
     case 'subscribe': {
       state.subscriptions.get(frame.root)?.()
-      state.subscriptions.set(frame.root, core.subscribe(state.device, frame.root, send))
+      state.subscriptions.set(frame.root, await core.subscribe(state.device, frame.root, send))
       send({ kind: 'ok', subscribed: frame.root })
       break
     }
     case 'envelope': {
-      core.clientEnvelope(state.device, frame.root, frame.envelope)
+      await core.clientEnvelope(state.device, frame.root, frame.envelope)
       break
     }
     case 'pubkeys': {
       // Роздача pubkey-ів approver+ (access.md «GET pubkeys») — хост звіряє
       // з ними підписи approvals.
-      send({ kind: 'pubkeys', root: frame.root, pubkeys: core.pubkeys(state.device, frame.root) })
+      send({ kind: 'pubkeys', root: frame.root, pubkeys: await core.pubkeys(state.device, frame.root) })
       break
     }
     case 'invite': {
-      const invitation = core.invite(state.device.account_id, frame.root, {
+      const invitation = await core.invite(state.device.account_id, frame.root, {
         email: frame.email,
         role: frame.role
       })
@@ -58,12 +58,12 @@ function handleFrame(core, state, frame, send) {
       break
     }
     case 'accept': {
-      const membership = core.accept(frame.invitation_id, state.device.account_id)
+      const membership = await core.accept(frame.invitation_id, state.device.account_id)
       send({ kind: 'ok', root: membership.root_node_hash, role: membership.role })
       break
     }
     case 'decline': {
-      core.decline(frame.invitation_id, state.device.account_id)
+      await core.decline(frame.invitation_id, state.device.account_id)
       send({ kind: 'ok', declined: frame.invitation_id })
       break
     }
@@ -71,7 +71,7 @@ function handleFrame(core, state, frame, send) {
       // Мережевий transfer — лише з Ed25519-підписом canonical-акта
       // пристроєм-ініціатором (fail-closed: без підпису — error-кадр).
       if (!frame.signature) throw new Error('transfer відхилено: бракує підпису акта')
-      core.transferOwnership(frame.root, state.device.account_id, frame.to_account, {
+      await core.transferOwnership(frame.root, state.device.account_id, frame.to_account, {
         device: state.device,
         signature: frame.signature
       })
@@ -82,7 +82,7 @@ function handleFrame(core, state, frame, send) {
       // Сідинг membership з owner:-розмітки лісу (owner-gated, ідемпотентно).
       send({
         kind: 'ok',
-        bootstrap: core.bootstrapMembers(state.device.account_id, frame.root, frame.entries)
+        bootstrap: await core.bootstrapMembers(state.device.account_id, frame.root, frame.entries)
       })
       break
     }
@@ -108,7 +108,7 @@ function handleConnection(core, socket) {
    */
   const send = frame => socket.send(JSON.stringify(frame))
 
-  socket.on('message', raw => {
+  socket.on('message', async raw => {
     let frame
     try {
       frame = JSON.parse(String(raw))
@@ -117,7 +117,7 @@ function handleConnection(core, socket) {
       return
     }
     try {
-      handleFrame(core, state, frame, send)
+      await handleFrame(core, state, frame, send)
     } catch (error) {
       send({ kind: 'error', message: String(error?.message ?? error) })
     }

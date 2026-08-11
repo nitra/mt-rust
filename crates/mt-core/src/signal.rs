@@ -270,11 +270,9 @@ fn audit_policy(dir: &Path) -> String {
 fn was_patched(dir: &Path) -> bool {
     fs::read_dir(dir.join("history"))
         .map(|entries| {
-            entries.flatten().any(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .ends_with("-invalidate")
-            })
+            entries
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().ends_with("-invalidate"))
         })
         .unwrap_or(false)
 }
