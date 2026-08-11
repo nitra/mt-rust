@@ -39,7 +39,7 @@ const VALUE_FLAGS = new Set(['--only', '--lang'])
  * @param {string[]} argv аргументи після імені скрипта
  * @returns {{command?: string, docsDir?: string, flags: Record<string, string | boolean>}} розібрані аргументи
  */
-export function parseArgv(argv) {
+function parseArgv(argv) {
   /** @type {Record<string, string | boolean>} */
   const flags = {}
   const positional = []
@@ -61,7 +61,7 @@ export function parseArgv(argv) {
  * @param {string} docsDir корінь полігона документації
  * @returns {{readFile: (rel: string) => string | null, writeFile: (rel: string, text: string) => void}} io-пара
  */
-export function createIo(docsDir) {
+function createIo(docsDir) {
   return {
     /**
      * @param {string} rel відносний шлях

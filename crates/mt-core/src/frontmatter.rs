@@ -558,7 +558,10 @@ mod tests {
     #[test]
     fn sequence_of_mappings() {
         let v = parse_yaml("retry_ladder:\n  - {}\n  - strategy: diagnose-first\n");
-        assert_eq!(v["retry_ladder"], json!([{}, {"strategy": "diagnose-first"}]));
+        assert_eq!(
+            v["retry_ladder"],
+            json!([{}, {"strategy": "diagnose-first"}])
+        );
     }
 
     #[test]

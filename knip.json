@@ -1,43 +1,14 @@
 {
-  "$schema": "https://unpkg.com/knip@5/schema.json",
-  "project": ["**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}"],
-  "ignore": ["**/__fixtures__/**"],
-  "ignoreDependencies": ["@nitra/cspell-dict", "/@cspell\\/dict-.+/", "ajv", "globals", "graphql"],
-  "ignoreBinaries": [
-    "actionlint",
-    "cspell",
-    "eslint",
-    "git-ai",
-    "jscpd",
-    "markdownlint-cli2",
-    "oxfmt",
-    "oxlint",
-    "shellcheck",
-    "trufflehog",
-    "uvx",
-    "v8r",
-    "zizmor"
-  ],
-  "workspaces": {
-    ".": {
-      "entry": [
-        "eslint.config.{js,mjs,cjs}",
-        "stylelint.config.{js,cjs,mjs}",
-        "oxlint.config.{js,mjs}",
-        "jscpd.config.{js,mjs}",
-        "markdownlint-cli2.config.{js,mjs,cjs,jsonc}",
-        ".markdownlint-cli2.{jsonc,cjs,mjs}",
-        "commitlint.config.{js,cjs,mjs}",
-        ".pi/extensions/**/index.ts"
-      ]
-    },
-    "relay": {
-      "entry": ["lib/relay.mjs", "stryker.config.mjs", "**/*.test.{js,mjs}"],
-      "project": ["**/*.{js,mjs}"]
-    },
-    "layers": {
-      "entry": ["lib/cli.mjs", "lib/status.mjs", "stryker.config.mjs", "**/*.test.{js,mjs}"],
-      "project": ["**/*.{js,mjs}"]
-    }
-  }
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": [".pi/**", "eslint.config.js", "**/stryker.config.mjs"],
+  "ignoreBinaries": ["oxfmt"],
+  "ignoreDependencies": [
+    "@7n/mt",
+    "@7n/rules-ci-github",
+    "@7n/rules-lang-js",
+    "@7n/rules-lang-rust",
+    "@nitra/cspell-dict",
+    "@nitra/eslint-config",
+    "@stryker-mutator/vitest-runner"
+  ]
 }

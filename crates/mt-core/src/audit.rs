@@ -76,7 +76,9 @@ fn publish_artifact(tasks_dir: &str, dir: &Path, file: &str, message: &str) -> R
     };
     let content = fs::read_to_string(&abs).map_err(|e| e.to_string())?;
     let config = crate::config::merge_config(
-        fs::read_to_string(repo_root.join(".mt.json")).ok().as_deref(),
+        fs::read_to_string(repo_root.join(".mt.json"))
+            .ok()
+            .as_deref(),
     );
     let outcome = crate::publish::publish_lifecycle(
         &repo_root,
@@ -196,8 +198,8 @@ pub fn amend(
     answer: &str,
 ) -> Result<String, String> {
     let dir = node_dir(tasks_dir, node_path)?;
-    let open = open_audit(&dir)
-        .ok_or_else(|| format!("{node_path}: немає відкритого аудит-циклу"))?;
+    let open =
+        open_audit(&dir).ok_or_else(|| format!("{node_path}: немає відкритого аудит-циклу"))?;
     if open.clarification_file.is_none() {
         return Err(format!(
             "{node_path}: уточнення не запитували — відповідати нема на що"
@@ -383,7 +385,11 @@ pub fn build_auditor_prompt(node_path: &str, dir: &Path, nnn: u64) -> String {
     let body = |name: &str| -> Option<String> {
         let content = fs::read_to_string(dir.join(name)).ok()?;
         let body = crate::frontmatter::get_body(&content);
-        let text = if body.trim().is_empty() { content } else { body };
+        let text = if body.trim().is_empty() {
+            content
+        } else {
+            body
+        };
         let text = text.trim();
         (!text.is_empty()).then(|| text.to_string())
     };
@@ -417,7 +423,8 @@ pub fn build_auditor_prompt(node_path: &str, dir: &Path, nnn: u64) -> String {
 mod tests {
     use super::*;
 
-    const TASK: &str = "---\nschema_version: 1\ncreated_at: 2026-06-06T10:00:00Z\n---\n\n## Task\n\nx\n";
+    const TASK: &str =
+        "---\nschema_version: 1\ncreated_at: 2026-06-06T10:00:00Z\n---\n\n## Task\n\nx\n";
 
     /// Вузол із відкритим аудит-циклом на NNN=001.
     fn node_with_open_audit() -> (tempfile::TempDir, String) {
@@ -426,7 +433,11 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("task.md"), TASK).unwrap();
         fs::write(dir.join("fact_001.md"), "---\n---\n\n## Summary\n\nok\n").unwrap();
-        fs::write(dir.join("pending-audit_001.md"), "---\nschema_version: 1\n---\n").unwrap();
+        fs::write(
+            dir.join("pending-audit_001.md"),
+            "---\nschema_version: 1\n---\n",
+        )
+        .unwrap();
         let root = tmp.path().to_string_lossy().into_owned();
         (tmp, root)
     }
@@ -440,7 +451,11 @@ mod tests {
             "---\nschema_version: 1\n---\n\n## Task\n\nx\n\n## Done when\n\nтести зелені\n",
         )
         .unwrap();
-        fs::write(dir.join("run_001.md"), "---\nresult: failed\n---\n\n## Blockers\n\nмучився довго\n").unwrap();
+        fs::write(
+            dir.join("run_001.md"),
+            "---\nresult: failed\n---\n\n## Blockers\n\nмучився довго\n",
+        )
+        .unwrap();
 
         let p = build_auditor_prompt("solo", &dir, 1);
         assert!(p.contains("Контракт (task.md)") && p.contains("тести зелені"));
@@ -522,7 +537,10 @@ mod tests {
             .contains("не запитували"));
 
         clarification(&root, "solo", "auditor", "Чому?").unwrap();
-        assert_eq!(amend(&root, "solo", "agent", "бо так").unwrap(), "amended_001.md");
+        assert_eq!(
+            amend(&root, "solo", "agent", "бо так").unwrap(),
+            "amended_001.md"
+        );
         assert!(amend(&root, "solo", "agent", "і ще").is_err());
     }
 
@@ -560,7 +578,11 @@ mod tests {
             "---\ncreated_at: 2020-01-01T00:00:00Z\n---\n\n## Question\n\nЧому?\n",
         )
         .unwrap();
-        fs::write(dir.join("amended_001.md"), "---\n---\n\n## Answer\n\nбо так\n").unwrap();
+        fs::write(
+            dir.join("amended_001.md"),
+            "---\n---\n\n## Answer\n\nбо так\n",
+        )
+        .unwrap();
         assert!(expire_clarification(&root, "solo", 1).unwrap().is_none());
     }
 

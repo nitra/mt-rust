@@ -508,7 +508,8 @@ fn build_engineer_prompt(
          - правка `a.md` — інший `model_tier`, інший `agent_cli`, інші `skills`.\n\n\
          Якщо причину усунуто і вузол готовий до звичайного виконання — опиши це \
          в `run-draft.md` секціями `## Completed` / `## Blockers` / `## Next Attempt`. \
-         Якщо ти сам довів задачу до результату — напиши `fact_" .to_string()
+         Якщо ти сам довів задачу до результату — напиши `fact_"
+            .to_string()
             + nnn
             + ".md` з `## Summary`.",
     );
@@ -614,7 +615,9 @@ fn build_agent_prompt(
             .map(|c| c.trim().to_string())
             .filter(|c| !c.is_empty())
         {
-            blocks.push(format!("## Прапор виконавця ({flag})\n\n```yaml\n{body}\n```"));
+            blocks.push(format!(
+                "## Прапор виконавця ({flag})\n\n```yaml\n{body}\n```"
+            ));
         }
     }
     let deps = dep_facts(tasks_root, node_dir);
@@ -957,12 +960,7 @@ pub fn run_node(tasks_dir: &str, node_path: &str) -> Result<RunOutcome, String> 
 
 /// [`run_node`] із явним актором — `mt run --actor engineer` (graph.md).
 pub fn run_node_as(tasks_dir: &str, node_path: &str, actor: Actor) -> Result<RunOutcome, String> {
-    run_node_env_as(
-        tasks_dir,
-        node_path,
-        &agent_cli_env_from_process(),
-        actor,
-    )
+    run_node_env_as(tasks_dir, node_path, &agent_cli_env_from_process(), actor)
 }
 
 /// Як [`run_node`], але з явним конфігом виконавців (ін'єкція для тестів).
@@ -1205,7 +1203,14 @@ pub fn run_node_env_as(
              ## Blockers\n\nнемає — потрібен людський апрув плану\n\n\
              ## Next Attempt\n\n`mt spawn --approve` матеріалізує дітей\n"
         );
-        let run_file = write_run_fm(&dir, &nnn_s, actor.as_str(), "decomposed", &sections, &extra_fm)?;
+        let run_file = write_run_fm(
+            &dir,
+            &nnn_s,
+            actor.as_str(),
+            "decomposed",
+            &sections,
+            &extra_fm,
+        )?;
         ("decomposed".to_string(), run_file, None, Vec::new())
     } else if kill_reason.is_none() && has_fact {
         let policy_required = fs::read_to_string(dir.join("task.md"))
@@ -1236,7 +1241,8 @@ pub fn run_node_env_as(
                 let sections = format!(
                     "\n## Completed\n\nfact записано, але ## Check не пройшов (fact відкликано)\n\n## Blockers\n\n{check_err}\n\n## Next Attempt\n\nвиправити і повторити done\n"
                 );
-                let run_file = write_run_fm(&dir, &nnn_s, actor.as_str(), "failed", &sections, &extra_fm)?;
+                let run_file =
+                    write_run_fm(&dir, &nnn_s, actor.as_str(), "failed", &sections, &extra_fm)?;
                 ("failed".to_string(), run_file, None, Vec::new())
             }
         }
@@ -1502,7 +1508,11 @@ mod tests {
         let before = build_agent_prompt("solo", &dir, tmp.path(), None, "004", 600);
         assert!(before.contains("Спроба 001"));
 
-        fs::write(dir.join("run-summary.md"), "Три спроби впирались у конфіг.\n").unwrap();
+        fs::write(
+            dir.join("run-summary.md"),
+            "Три спроби впирались у конфіг.\n",
+        )
+        .unwrap();
         let after = build_agent_prompt("solo", &dir, tmp.path(), None, "004", 600);
         assert!(after.contains("Три спроби впирались"));
         assert!(!after.contains("Спроба 001"), "резюме витісняє перелік");
@@ -1553,8 +1563,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("solo");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("run_001.md"), "---\nresult: failed\n---\n\n## Blockers\n\nстаре\n")
-            .unwrap();
+        fs::write(
+            dir.join("run_001.md"),
+            "---\nresult: failed\n---\n\n## Blockers\n\nстаре\n",
+        )
+        .unwrap();
         fs::write(dir.join("fact_002.md"), "---\n---\n\n## Summary\n\nok\n").unwrap();
         assert!(full_run_history(&dir).is_empty());
     }
@@ -1596,9 +1609,15 @@ mod tests {
         assert!(needs_planning(&dir, &no_hint), "рішення ще немає");
 
         // Людський hint — рішення вже ухвалене, зайвий виклик моделі не потрібен.
-        assert!(!needs_planning(&dir, &serde_json::json!({"hint": "atomic"})));
+        assert!(!needs_planning(
+            &dir,
+            &serde_json::json!({"hint": "atomic"})
+        ));
         // composite-hint планування не скасовує: склад підзадач ще треба вигадати.
-        assert!(needs_planning(&dir, &serde_json::json!({"hint": "composite"})));
+        assert!(needs_planning(
+            &dir,
+            &serde_json::json!({"hint": "composite"})
+        ));
 
         // Наявний план (напр. від явного `mt plan`) теж закриває питання.
         fs::write(dir.join("plan_001.md"), "---\ndecision: atomic\n---\n").unwrap();
@@ -1656,8 +1675,7 @@ mod tests {
         crate::test_support::push_head(repo.work.path(), "refs/heads/main");
 
         let r = root.to_string_lossy().into_owned();
-        const WRITES_COMPOSITE_PLAN: &str =
-            r#"printf -- '---\nschema_version: 1\ndecision: composite\n---\n\n## Children\n\nchildren\n' > plan_001.md"#;
+        const WRITES_COMPOSITE_PLAN: &str = r#"printf -- '---\nschema_version: 1\ndecision: composite\n---\n\n## Children\n\nchildren\n' > plan_001.md"#;
         with_path_shims(&[("claude", WRITES_COMPOSITE_PLAN)], || {
             let out = run_node_env(&r, "solo", &env_default()).unwrap();
             assert_eq!(out.result, "decomposed");
