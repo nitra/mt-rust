@@ -25,6 +25,11 @@ pub fn is_ephemeral(event: &Event) -> bool {
     )
 }
 
+/// Скільки журнальованих подій сесія тримає в памʼяті. Глибший реплей
+/// дочитується з `session.jsonl` — межа тут не про коректність, а про те,
+/// щоб довга сесія не тримала весь свій журнал у RSS хоста.
+const SESSION_BUFFER: usize = 500;
+
 /// Одна сесія (run вузла): лічильник seq, журнал, файл `session.jsonl`.
 pub struct Session {
     pub node_hash: String,
@@ -52,6 +57,10 @@ impl Session {
             }
         }
         let next_seq = journal.last().map(|envelope| envelope.seq + 1).unwrap_or(0);
+        if journal.len() > SESSION_BUFFER {
+            let excess = journal.len() - SESSION_BUFFER;
+            journal.drain(..excess);
+        }
         let run_token = journal
             .last()
             .map(|envelope| envelope.run_token)
@@ -85,6 +94,11 @@ impl Session {
         state.next_seq += 1;
         if !is_ephemeral(&envelope.event) {
             state.journal.push(envelope.clone());
+            // Памʼять тримає лише хвіст: глибший реплей іде з session.jsonl.
+            if state.journal.len() > SESSION_BUFFER {
+                let excess = state.journal.len() - SESSION_BUFFER;
+                state.journal.drain(..excess);
+            }
             // Append-only запис; помилка диска не валить сесію — журнал
             // лишається в памʼяті, персистентність відновиться наступним записом.
             if let Ok(mut file) = OpenOptions::new()
@@ -99,14 +113,45 @@ impl Session {
     }
 
     /// Журнальовані події з `seq >= from` (реплей для реконекту).
+    ///
+    /// Глибина поза буфером дочитується з `session.jsonl` (runtime.md):
+    /// памʼять тримає лише хвіст, тож довга сесія не росте без меж, а клієнт,
+    /// який був офлайн довше за буфер, усе одно отримує повну історію.
     pub fn replay_from(&self, from: u64) -> Vec<Envelope> {
-        self.state
-            .lock()
-            .unwrap()
-            .journal
-            .iter()
+        let state = self.state.lock().unwrap();
+        let buffered_start = state.journal.first().map(|e| e.seq);
+        let in_buffer = buffered_start.is_none_or(|start| from >= start);
+        if in_buffer {
+            return state
+                .journal
+                .iter()
+                .filter(|envelope| envelope.seq >= from)
+                .cloned()
+                .collect();
+        }
+        drop(state);
+        self.replay_from_disk(from)
+    }
+
+    /// Дочитування журналу з диска — повільний шлях глибокого реплею.
+    /// Помилка читання не валить сесію: краще віддати те, що є в буфері,
+    /// ніж розірвати клієнта.
+    fn replay_from_disk(&self, from: u64) -> Vec<Envelope> {
+        let Ok(content) = fs::read_to_string(&self.journal_path) else {
+            return self
+                .state
+                .lock()
+                .unwrap()
+                .journal
+                .iter()
+                .filter(|e| e.seq >= from)
+                .cloned()
+                .collect();
+        };
+        content
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Envelope>(line).ok())
             .filter(|envelope| envelope.seq >= from)
-            .cloned()
             .collect()
     }
 }
@@ -209,6 +254,70 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let host = SessionHost::new(dir.path().to_path_buf()).unwrap();
         (dir, host)
+    }
+
+    fn user_message(session: &Session, text: &str) -> Envelope {
+        session.append(
+            Event::UserMessage {
+                text: text.to_string(),
+                attachments: vec![],
+                surface: None,
+            },
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn memory_buffer_is_bounded_but_replay_stays_complete() {
+        // Довга сесія не тримає весь журнал у памʼяті…
+        let (_dir, host) = host();
+        let session = host.get_or_open("room-deep").unwrap();
+        let total = SESSION_BUFFER + 50;
+        for i in 0..total {
+            user_message(&session, &format!("msg {i}"));
+        }
+        assert_eq!(
+            session.state.lock().unwrap().journal.len(),
+            SESSION_BUFFER,
+            "буфер обмежений"
+        );
+
+        // …але клієнт, який був офлайн довше за буфер, отримує все з диска.
+        let deep = session.replay_from(0);
+        assert_eq!(deep.len(), total, "глибокий реплей дочитує session.jsonl");
+        assert_eq!(deep.first().unwrap().seq, 0);
+        assert_eq!(deep.last().unwrap().seq, total as u64 - 1);
+    }
+
+    #[test]
+    fn shallow_replay_is_served_from_memory() {
+        let (_dir, host) = host();
+        let session = host.get_or_open("room-shallow").unwrap();
+        for i in 0..5 {
+            user_message(&session, &format!("msg {i}"));
+        }
+        let tail = session.replay_from(3);
+        assert_eq!(tail.len(), 2);
+        assert_eq!(tail.first().unwrap().seq, 3);
+    }
+
+    #[test]
+    fn reopened_session_continues_seq_beyond_buffer() {
+        // Рестарт хоста: seq не має «відкотитись» через обрізаний буфер.
+        let dir = tempfile::tempdir().unwrap();
+        let total = SESSION_BUFFER + 10;
+        {
+            let host = SessionHost::new(dir.path().to_path_buf()).unwrap();
+            let session = host.get_or_open("room-restart").unwrap();
+            for i in 0..total {
+                user_message(&session, &format!("msg {i}"));
+            }
+        }
+        let host = SessionHost::new(dir.path().to_path_buf()).unwrap();
+        let session = host.get_or_open("room-restart").unwrap();
+        let next = user_message(&session, "після рестарту");
+        assert_eq!(next.seq, total as u64, "seq продовжується, а не скидається");
     }
 
     /// seq монотонний; ефемерні події не потрапляють у журнал.
