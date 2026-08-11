@@ -3,22 +3,6 @@
 version = 4
 
 [[package]]
-name = "agent-cli"
-version = "0.1.30"
-dependencies = [
- "agent-core",
- "agent-protocol",
- "agent-server",
- "chrono",
- "clap",
- "futures",
- "serde_json",
- "tokio",
- "tokio-tungstenite 0.30.0",
- "uuid",
-]
-
-[[package]]
 name = "agent-core"
 version = "0.1.30"
 dependencies = [
@@ -2091,13 +2075,20 @@ dependencies = [
 name = "mt"
 version = "0.1.30"
 dependencies = [
+ "agent-core",
+ "agent-protocol",
+ "agent-server",
  "chrono",
  "clap",
  "clap_complete",
+ "futures",
  "mt-core",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "uuid",
 ]
 
 [[package]]

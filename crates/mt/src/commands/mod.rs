@@ -5,6 +5,7 @@ pub mod graph;
 pub mod lifecycle;
 pub mod plan;
 pub mod run;
+pub mod session;
 pub mod signal;
 pub mod task;
 pub mod worktree;

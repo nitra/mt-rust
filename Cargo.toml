@@ -1,6 +1,5 @@
 [workspace]
 members = [
-  "crates/agent-cli",
   "crates/agent-core",
   "crates/agent-protocol",
   "crates/agent-server",
