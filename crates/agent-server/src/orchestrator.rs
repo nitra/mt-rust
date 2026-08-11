@@ -27,6 +27,8 @@ pub struct TickReport {
     pub dispatched: Vec<(String, String)>,
     /// Вузли, що вперше стали `unresolvable` — алерт власнику.
     pub alerts: Vec<String>,
+    /// Вузли з відкритим аудит-циклом, які цей tick віддав аудиторові.
+    pub audited: Vec<String>,
     /// Прибрані worktree.
     pub pruned: Vec<String>,
     /// Помилки, які не мають валити цикл (наступний wake спробує знову).
@@ -93,6 +95,26 @@ impl Wake {
             std::thread::sleep(Duration::from_millis(200).min(self.interval));
         }
     }
+}
+
+/// Черга аудиту (graph.md, «Аудит (async черга)»): вузли у стані
+/// `pending-audit`. Саме її розбирає orchestrator на кожному прокиданні —
+/// це і є тригер `audit_schedule_days`, тільки подієвий, а не за таймером:
+/// цикл, відкритий сигналом `mt audit`, не має чекати наступної доби.
+///
+/// Порядок детермінований (за шляхом) — щоб два хости, які прокинулись
+/// одночасно, бралися за чергу однаково, а не змагались хаотично.
+pub fn audit_queue(nodes: &[mt_core::TaskNode]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack: Vec<&mt_core::TaskNode> = nodes.iter().collect();
+    while let Some(node) = stack.pop() {
+        if node.state == mt_core::TaskState::PendingAudit {
+            out.push(node.path.clone());
+        }
+        stack.extend(node.children.iter());
+    }
+    out.sort();
+    out
 }
 
 fn file_mtime(path: &Path) -> Option<SystemTime> {
@@ -168,7 +190,20 @@ impl Orchestrator {
         }
 
         match mt_core::scan_tasks_with_claims(self.tasks_dir.clone(), Vec::new()) {
-            Ok(nodes) => report.alerts = self.pending_alerts(&nodes),
+            Ok(nodes) => {
+                report.alerts = self.pending_alerts(&nodes);
+                let queue = audit_queue(&nodes);
+                for path in queue {
+                    match mt_core::audit::run_auditor(
+                        &self.tasks_dir,
+                        &path,
+                        &mt_core::config::agent_cli_env_from_process(),
+                    ) {
+                        Ok(_) => report.audited.push(path),
+                        Err(error) => report.errors.push(format!("audit {path}: {error}")),
+                    }
+                }
+            }
             Err(error) => report.errors.push(format!("scan: {error}")),
         }
 
@@ -230,6 +265,31 @@ mod tests {
             .children
             .push(node("parent/child", mt_core::TaskState::Unresolvable));
         assert_eq!(orch.pending_alerts(&[parent]), ["parent/child"]);
+    }
+
+    #[test]
+    fn audit_queue_collects_open_cycles_deterministically() {
+        let mut parent = node("b-parent", mt_core::TaskState::Spawned);
+        parent
+            .children
+            .push(node("b-parent/child", mt_core::TaskState::PendingAudit));
+        let nodes = vec![
+            node("a-solo", mt_core::TaskState::PendingAudit),
+            parent,
+            node("c-done", mt_core::TaskState::Resolved),
+        ];
+        // Лише відкриті цикли, і в стабільному порядку — щоб два хости,
+        // які прокинулись разом, бралися за чергу однаково.
+        assert_eq!(audit_queue(&nodes), ["a-solo", "b-parent/child"]);
+    }
+
+    #[test]
+    fn audit_queue_is_empty_without_open_cycles() {
+        let nodes = vec![
+            node("solo", mt_core::TaskState::Waiting),
+            node("done", mt_core::TaskState::Resolved),
+        ];
+        assert!(audit_queue(&nodes).is_empty());
     }
 
     #[test]
