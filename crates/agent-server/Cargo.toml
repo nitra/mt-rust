@@ -12,6 +12,7 @@ name = "agent_server"
 [dependencies]
 agent-core = { path = "../agent-core" }
 agent-protocol = { path = "../agent-protocol" }
+base64.workspace = true
 async-trait.workspace = true
 mt-core = { path = "../mt-core" }
 axum.workspace = true

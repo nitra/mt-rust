@@ -385,20 +385,12 @@ pub(crate) async fn handle_client_frame(
             {
                 // Верифікований вердикт журналюється у сесію (аудит-трейл)
                 // і матеріалізується у run вузла (## Approvals при done).
-                Ok(verdict) => {
-                    let line = format!(
-                        "- {} device={} approved={verdict} request={request_id} signature={}",
-                        chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ"),
-                        device_id
-                            .map(|id| id.to_string())
-                            .unwrap_or_else(|| "local".into()),
-                        signature
-                            .iter()
-                            .map(|byte| format!("{byte:02x}"))
-                            .collect::<String>(),
-                    );
+                Ok(mut record) => {
+                    // account_id приходить із конверта підписанта — саме він
+                    // відповідає у трейлі за «хто дозволив», а не пристрій.
+                    record.account_id = envelope.account_id;
                     if let Some(run) = state.runs.lock().await.get_mut(&node) {
-                        run.add_approval(line);
+                        run.add_approval(record.to_yaml_line(chrono::Utc::now()));
                     }
                     state.sessions.publish(
                         &session,
