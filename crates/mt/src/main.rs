@@ -50,6 +50,10 @@ enum Command {
     Attach(commands::session::AttachArgs),
     /// «Перенести сюди»: забрати вузол у поточного тримача через relay.
     Handoff(commands::session::HandoffArgs),
+    /// Спакувати розвилку власнику мандата (`decision-request`).
+    Escalate(commands::decision::EscalateArgs),
+    /// Відповідь власника на розвилку (`chosen_option`).
+    Decide(commands::decision::DecideArgs),
     /// Зупинити виконання піддерева (running-маркери, від листів).
     Stop(commands::lifecycle::StopArgs),
     /// Вердикт аудитора: закриває цикл (`audit-result_NNN.md`).
@@ -100,6 +104,8 @@ fn main() {
         Command::Serve(args) => commands::session::run_serve_cmd(args, json),
         Command::Attach(args) => commands::session::run_attach_cmd(args, json),
         Command::Handoff(args) => commands::session::run_handoff_cmd(args, json),
+        Command::Escalate(args) => commands::decision::run_escalate(args, json),
+        Command::Decide(args) => commands::decision::run_decide(args, json),
         Command::Stop(args) => commands::lifecycle::run_stop(args, json),
         Command::Verdict(args) => commands::audit::run_verdict(args, json),
         Command::Clarify(args) => commands::audit::run_clarify(args, json),

@@ -160,6 +160,7 @@ fn remote_approval_response(
         event: agent_protocol::Event::ApprovalResponse {
             request_id: request_id.into(),
             approved,
+            chosen_option: None,
             signature,
         },
     };

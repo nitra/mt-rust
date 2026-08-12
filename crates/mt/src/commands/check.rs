@@ -1,5 +1,6 @@
 //! `mt check` (колишній `mt watch`) — one-shot attention/CI-гейт: pending-audit
-//! без результату, stale worktrees, вузли на plan-review, провалені вузли.
+//! без результату, відкриті розвилки, stale worktrees, вузли на plan-review,
+//! провалені вузли.
 //! exit 0 — чисто; exit 1 — є що переглянути.
 
 use clap::Args;
@@ -16,9 +17,11 @@ fn flatten<'a>(nodes: &'a [TaskNode], out: &mut Vec<&'a TaskNode>) {
     }
 }
 
+/// Аргументи команди `mt check`.
 #[derive(Args)]
 pub struct CheckArgs {}
 
+/// Виконує one-shot перевірку задач і worktrees та повертає `Err`, якщо потрібна увага.
 pub fn run(_args: CheckArgs, as_json: bool) -> Result<(), String> {
     let tasks_dir = resolve_tasks_dir(false)?;
     let worktrees = discover_worktrees(std::path::Path::new(&tasks_dir));
@@ -29,6 +32,13 @@ pub fn run(_args: CheckArgs, as_json: bool) -> Result<(), String> {
     let pending_audit: Vec<&str> = all
         .iter()
         .filter(|n| n.state == TaskState::PendingAudit)
+        .map(|n| n.path.as_str())
+        .collect();
+    // Відкрита розвилка — за визначенням те, що чекає саме на людину, тож
+    // вона в гейті уваги нарівні з pending-audit.
+    let awaiting_decision: Vec<&str> = all
+        .iter()
+        .filter(|n| n.state == TaskState::AwaitingDecision)
         .map(|n| n.path.as_str())
         .collect();
     let plan_review: Vec<&str> = all
@@ -55,12 +65,15 @@ pub fn run(_args: CheckArgs, as_json: bool) -> Result<(), String> {
         Err(_) => Vec::new(),
     };
 
-    let needs_attention =
-        !pending_audit.is_empty() || !plan_review.is_empty() || !stale_worktrees.is_empty();
+    let needs_attention = !pending_audit.is_empty()
+        || !awaiting_decision.is_empty()
+        || !plan_review.is_empty()
+        || !stale_worktrees.is_empty();
 
     if as_json {
         json(&serde_json::json!({
             "pending_audit": pending_audit,
+            "awaiting_decision": awaiting_decision,
             "plan_review": plan_review,
             "failed": failed,
             "stale_worktrees": stale_worktrees,
@@ -71,6 +84,9 @@ pub fn run(_args: CheckArgs, as_json: bool) -> Result<(), String> {
     } else {
         for p in &pending_audit {
             println!("pending-audit: {p}");
+        }
+        for p in &awaiting_decision {
+            println!("awaiting-decision: {p}");
         }
         for p in &plan_review {
             println!("plan-review: {p}");

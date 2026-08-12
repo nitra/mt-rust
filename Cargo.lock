@@ -2084,6 +2084,7 @@ dependencies = [
  "clap_complete",
  "futures",
  "mt-core",
+ "mt-mandates",
  "serde",
  "serde_json",
  "tempfile",
