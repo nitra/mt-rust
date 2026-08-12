@@ -63,6 +63,37 @@ async function roundtrip(socket, frame) {
   return JSON.parse(String(raw))
 }
 
+/**
+ * Сокет із буфером усіх отриманих кадрів.
+ *
+ * Навіщо не `once(socket, 'message')`: одноразовий слухач ловить лише той
+ * кадр, що прийшов, поки на ньому чекають, — а relay шле пачками (реплей
+ * буфера кімнати одразу після `subscribe`), тож кадри між очікуваннями
+ * просто губляться. Тут слухач стоїть постійно, а чекання йде по буферу.
+ * @param {number} port порт relay
+ * @returns {Promise<{socket: WebSocket, waitFor: (matches: (frame: object) => boolean) => Promise<object>}>} сокет і очікувач
+ */
+async function collectingSocket(port) {
+  const socket = new WebSocket(`${WS_SCHEME}//127.0.0.1:${port}`)
+  const inbox = []
+  let notify = null
+  socket.on('message', raw => {
+    inbox.push(JSON.parse(String(raw)))
+    notify?.()
+  })
+  await once(socket, 'open')
+  const waitFor = async matches => {
+    for (;;) {
+      const index = inbox.findIndex(matches)
+      if (index >= 0) return inbox.splice(index, 1)[0]
+      await new Promise(resolve => {
+        notify = resolve
+      })
+    }
+  }
+  return { socket, waitFor }
+}
+
 /** @type {object} */
 let owner
 /** @type {object} */
@@ -320,4 +351,46 @@ test('set_push_token: пристрій реєструє і знімає токе
   await roundtrip(socket, { kind: 'set_push_token', push_token: '' })
   expect(await store.pushTokensFor(owner.account_id)).toEqual([])
   socket.close()
+})
+
+test('presence через WS: оголошення, who, зняття при розриві', async () => {
+  const watcher = await collectingSocket(server.port)
+  watcher.socket.send(JSON.stringify({ kind: 'hello', device_token: viewerToken }))
+  await watcher.waitFor(frame => Boolean(frame.device_id))
+  watcher.socket.send(JSON.stringify({ kind: 'subscribe', root: 'root-1' }))
+  await watcher.waitFor(frame => frame.subscribed === 'root-1')
+
+  const announcer = await collectingSocket(server.port)
+  announcer.socket.send(JSON.stringify({ kind: 'hello', device_token: hostToken }))
+  await announcer.waitFor(frame => Boolean(frame.device_id))
+  announcer.socket.send(
+    JSON.stringify({
+      kind: 'presence',
+      root: 'root-1',
+      hostname: 'mac-vitalii',
+      projects: ['mt'],
+      nodes: ['mt/demo']
+    })
+  )
+  const announced = await announcer.waitFor(frame => Boolean(frame.presence))
+  expect(announced.presence).toMatchObject({ hostname: 'mac-vitalii' })
+
+  // Учасник кімнати бачить зміну присутності live.
+  const changed = await watcher.waitFor(frame => frame.event?.type === 'PresenceChanged')
+  expect(changed.event).toMatchObject({ hostname: 'mac-vitalii', nodes: ['mt/demo'] })
+
+  watcher.socket.send(JSON.stringify({ kind: 'who', root: 'root-1' }))
+  const who = await watcher.waitFor(frame => frame.kind === 'presence')
+  expect(who.devices).toHaveLength(1)
+  expect(who.devices[0]).toMatchObject({ hostname: 'mac-vitalii', projects: ['mt'] })
+
+  // Розрив зʼєднання знімає presence негайно, не чекаючи TTL.
+  announcer.socket.close()
+  const gone = await watcher.waitFor(frame => frame.event?.gone === true)
+  expect(gone.event.type).toBe('PresenceChanged')
+
+  watcher.socket.send(JSON.stringify({ kind: 'who', root: 'root-1' }))
+  const empty = await watcher.waitFor(frame => frame.kind === 'presence')
+  expect(empty.devices).toEqual([])
+  watcher.socket.close()
 })

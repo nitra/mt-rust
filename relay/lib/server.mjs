@@ -6,6 +6,7 @@
  * `{kind:"hello", device_token}`,
  * `{kind:"subscribe", root}`, `{kind:"envelope", root, envelope}`,
  * `{kind:"set_push_token", push_token}`,
+ * presence (`{kind:"presence", root, hostname, projects, nodes}`, `{kind:"who", root}`),
  * membership-операції (`invite`, `accept`, `decline`, `transfer_ownership`
  * з Ed25519-підписом акта, `bootstrap_owners`);
  * relay → `{kind:"ok"|"error", ...}`, `{kind:"envelope"|"event", ...}`.
@@ -23,7 +24,7 @@ const FRAME_LIMIT = 2 * 1024 * 1024
 /**
  * Обробляє один JSON-кадр клієнта.
  * @param {import('./relay.mjs').RelayCore} core ядро relay
- * @param {{ device: object | null, subscriptions: Map<string, () => void> }} state стан зʼєднання
+ * @param {{ device: object | null, subscriptions: Map<string, () => void>, presence: Set<string> }} state стан зʼєднання
  * @param {object} frame розібраний кадр
  * @param {(frame: object) => void} send доставка кадрів клієнту
  * @returns {void}
@@ -59,6 +60,24 @@ async function handleFrame(core, state, frame, send) {
     }
     case 'envelope': {
       await core.clientEnvelope(state.device, frame.root, frame.envelope)
+      break
+    }
+    case 'presence': {
+      // Оголошення присутності; кімната запамʼятовується у стані
+      // зʼєднання, щоб на close зняти presence без повторного кадру.
+      state.presence.add(frame.root)
+      send({
+        kind: 'ok',
+        presence: await core.announcePresence(state.device, frame.root, {
+          hostname: frame.hostname,
+          projects: frame.projects,
+          nodes: frame.nodes
+        })
+      })
+      break
+    }
+    case 'who': {
+      send({ kind: 'presence', root: frame.root, devices: await core.presenceOf(state.device, frame.root) })
       break
     }
     case 'set_push_token': {
@@ -124,7 +143,7 @@ async function handleFrame(core, state, frame, send) {
  */
 function handleConnection(core, socket) {
   /** @type {{ device: object | null, subscriptions: Map<string, () => void> }} */
-  const state = { device: null, subscriptions: new Map() }
+  const state = { device: null, subscriptions: new Map(), presence: new Set() }
 
   /**
    * Надсилає JSON-кадр клієнту.
@@ -151,6 +170,12 @@ function handleConnection(core, socket) {
   socket.on('close', () => {
     for (const unsubscribe of state.subscriptions.values()) unsubscribe()
     state.subscriptions.clear()
+    // Presence ефемерна: розрив зʼєднання знімає її негайно, не чекаючи
+    // TTL — інакше кімната показувала б відсутніх ще півтори хвилини.
+    for (const root of state.presence) {
+      if (state.device) core.dropPresence(state.device, root)
+    }
+    state.presence.clear()
   })
 }
 

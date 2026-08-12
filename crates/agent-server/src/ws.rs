@@ -158,6 +158,13 @@ impl AppState {
         self.runs.lock().await.contains_key(node)
     }
 
+    /// Вузли, які цей хост зараз тримає — вміст presence «активні вузли»
+    /// (access.md). Джерело — локальний облік run-ів, тобто те саме, що
+    /// відповідає на `holds_node`.
+    pub async fn active_nodes(&self) -> Vec<String> {
+        self.runs.lock().await.keys().cloned().collect()
+    }
+
     /// Generation claim-а активного run-а (для `ClaimChanged` після pull).
     pub async fn node_generation(&self, node: &str) -> Option<u64> {
         self.runs
