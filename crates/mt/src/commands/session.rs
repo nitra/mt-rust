@@ -208,11 +208,25 @@ async fn run_serve(
             println!(
                 "orchestrator: {tasks_dir} (wake: relay push | .mt/wake | {WAKE_FALLBACK_SEC}s)"
             );
+            let sessions = Arc::clone(&state.sessions);
             Some(std::thread::spawn(move || {
                 let mut orch = Orchestrator::new(tasks_dir, 5);
                 loop {
                     wake.wait();
                     let report = orch.tick();
+                    // Стрічка для `mt-dashboard`: derived-стан — спостереження
+                    // за графом, а не частина журналу run-а, тому broadcast
+                    // без запису в сесію (session.rs, `broadcast_only`).
+                    for (path, node_state) in &report.state_changes {
+                        sessions.broadcast_only(
+                            path,
+                            agent_protocol::Event::NodeState {
+                                path: path.clone(),
+                                state: node_state.clone(),
+                                claim: None,
+                            },
+                        );
+                    }
                     for node in &report.alerts {
                         eprintln!("⚠ unresolvable: {node} — чекає людину");
                     }

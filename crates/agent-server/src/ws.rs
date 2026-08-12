@@ -316,9 +316,36 @@ async fn reject(socket: &mut WebSocket, message: String) {
     let _ = socket.send(Message::Close(None)).await;
 }
 
-/// Чи можна доставити подію клієнту з такими capabilities
-/// (`PreviewScreenshot` — лише клієнтам із «preview»).
-fn allowed(event: &Event, capabilities: &[String]) -> bool {
+/// `client_kind` дашборда (runtime.md, «`mt-dashboard`»).
+pub const DASHBOARD_CLIENT_KIND: &str = "mt-dashboard";
+
+/// Чи є подія графовою — тобто такою, що описує стан вузла, а не хід
+/// розмови. Рівно перелік зі спеки (runtime.md, «`mt-dashboard`»),
+/// плюс `Error`: клієнт мусить бачити відмову, інакше вона для нього
+/// невідрізненна від тиші.
+fn is_graph_event(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::NodeState { .. }
+            | Event::ClaimChanged { .. }
+            | Event::PlanReview { .. }
+            | Event::AuditPending { .. }
+            | Event::Committed { .. }
+            | Event::Error { .. }
+    )
+}
+
+/// Чи можна доставити подію клієнту.
+///
+/// Два незалежні фільтри: capability (`PreviewScreenshot` — лише «preview»)
+/// і `client_kind`. Дашборд дивиться на весь граф як на одну картину, тому
+/// чат-стрім йому не шлеться взагалі — не «клієнт сам відсіє», а хост не
+/// надсилає: інакше кожен дашборд тягнув би дельти тексту всіх ходів,
+/// щоб їх викинути.
+fn allowed(event: &Event, capabilities: &[String], client_kind: &str) -> bool {
+    if client_kind == DASHBOARD_CLIENT_KIND {
+        return is_graph_event(event);
+    }
     match event {
         Event::PreviewScreenshot { .. } => capabilities.iter().any(|c| c == "preview"),
         _ => true,
@@ -374,8 +401,11 @@ async fn client_connection(mut socket: WebSocket, state: Arc<AppState>) {
     if let Some(from) = hello.want_replay_from {
         for envelope in state.sessions.replay_from(from) {
             last_sent_seq = Some(envelope.seq);
-            if allowed(&envelope.event, &hello.client_capabilities)
-                && send_json(&mut socket, &envelope).await.is_err()
+            if allowed(
+                &envelope.event,
+                &hello.client_capabilities,
+                &hello.client_kind,
+            ) && send_json(&mut socket, &envelope).await.is_err()
             {
                 return;
             }
@@ -402,8 +432,11 @@ async fn client_connection(mut socket: WebSocket, state: Arc<AppState>) {
             update = updates.recv() => match update {
                 Ok(envelope) => {
                     last_sent_seq = Some(envelope.seq);
-                    if allowed(&envelope.event, &hello.client_capabilities)
-                        && send_json(&mut socket, &envelope).await.is_err()
+                    if allowed(
+                        &envelope.event,
+                        &hello.client_capabilities,
+                        &hello.client_kind,
+                    ) && send_json(&mut socket, &envelope).await.is_err()
                     {
                         break;
                     }
@@ -420,8 +453,11 @@ async fn client_connection(mut socket: WebSocket, state: Arc<AppState>) {
                     let mut failed = false;
                     for envelope in missed {
                         last_sent_seq = Some(envelope.seq);
-                        if allowed(&envelope.event, &hello.client_capabilities)
-                            && send_json(&mut socket, &envelope).await.is_err()
+                        if allowed(
+                            &envelope.event,
+                            &hello.client_capabilities,
+                            &hello.client_kind,
+                        ) && send_json(&mut socket, &envelope).await.is_err()
                         {
                             failed = true;
                             break;
