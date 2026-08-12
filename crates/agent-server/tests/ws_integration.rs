@@ -93,12 +93,15 @@ async fn handshake_turn_and_event_stream() {
     let delta: Envelope = next_json(&mut stream).await;
     let done: Envelope = next_json(&mut stream).await;
 
+    // Ехо несе резолвлений surface ходу: клієнт підключився як `cli`, і
+    // без hint саме він стає режимом першого ходу (surfaces.md). Раніше тут
+    // стояло `None` — режим ходу зникав зі стрічки й журналу.
     assert_eq!(
         user.event,
         Event::UserMessage {
             text: "питання".into(),
             attachments: vec![],
-            surface: None
+            surface: Some("cli".into())
         }
     );
     assert_eq!(

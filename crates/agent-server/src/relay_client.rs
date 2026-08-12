@@ -229,7 +229,9 @@ async fn handle_incoming(state: &Arc<AppState>, text: &str, self_device_id: Opti
     let state = Arc::clone(state);
     let raw_envelope = envelope.to_string();
     tokio::spawn(async move {
-        handle_client_frame(&state, &raw_envelope, device_id).await;
+        // client_kind віддаленого пристрою мосту невідомий — липкість і
+        // hint покривають резолюцію без нього.
+        handle_client_frame(&state, &raw_envelope, device_id, "").await;
     });
 }
 

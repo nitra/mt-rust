@@ -19,7 +19,7 @@
 | M0 — dogfood ядра | цикл замкнено | recurrence; secrets broker; телеметрія вартості |
 | M1 — agent-server | ✅ закрито | — |
 | M2 — mission control | частково | зміна ролі/видалення учасника, ротація/revocation ключів, checkpoint-handoff, CLI `mt sessions` |
-| M3 — dashboard і поверхні | почався | surface-профілі, MCP-сервери, preview/`ContextSelected` |
+| M3 — dashboard і поверхні | почався | MCP-сервери (чекають secrets-брокера), preview-модуль |
 | M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |
 | M5 — мета-цикл retro | не починався | увесь рушій; дані для нього вже накопичуються |
 | M6 — мандати й Дельта | фаза 0 закрита | escalation-intake, маршрутизація за важелем, прецеденти, селектор, профілі, watcher |
@@ -73,7 +73,9 @@
 | ACP-транспорт | РЕАЛІЗОВАНО | `agent-core/acp.rs` | `mcpServers` жорстко порожній |
 | Orchestrator-роль у agent-server + wake | РЕАЛІЗОВАНО | `agent-server/orchestrator.rs` `Wake`/`Orchestrator::tick`; relay push → `AppState::wake_orchestrator` | — |
 | `client_kind: mt-dashboard` | РЕАЛІЗОВАНО | фільтр стрічки — `agent-server/ws.rs` `allowed`/`is_graph_event`; емітер `NodeState` — `orchestrator.rs` `state_changes` (лише зміни), публікація — `broadcast_only` у циклі `mt serve` | — (піддерево не звужується на хості: спека кладе агрегацію на клієнта) |
-| Surface-профілі, MCP, preview, `ContextSelected` | ВІДСУТНЄ | — | Уся глава `surfaces.md` |
+| Surface-профілі + `ContextSelected` | РЕАЛІЗОВАНО | `mt-core/surfaces.rs` (парсер обох форм конфігу, резолюція hint→липкість→default, стеля `a.md.skills`, `check_context_kind`); хост — `agent-server/ws.rs` (`resolve_turn_surface`, гейт `ContextSelected`, surface у ехо `UserMessage`) | — |
+| MCP-сервери surface | ВІДСУТНЄ | — | `mcp_servers` у `.mt.json`, лінивий старт і idle-TTL, `mcp:<name>` у `tools`; `secret:`-значення чекають на secrets-брокер (окремий рядок) |
+| Preview-модуль (`PreviewScreenshot`, picker) | ВІДСУТНЄ | — | Подія й capability-фільтр є; самого модуля немає |
 
 ## Люди, доступ, relay
 
@@ -115,7 +117,7 @@
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
 4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт ✅, `HandoffRequest` через relay ✅, presence ✅.
 5. **M6 фаза 0 — ✅ закрито.** `mandates.yaml` (включно з `kind: model` і `audacity`), валідація змін, квіз-гейт — `crates/mt-mandates`; `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision` і вихід «вичерпана драбина → розвилка» — `mt-core/decision.rs` + `mt escalate`/`mt decide`. Лишається агент escalation-intake: механіка розвилки є, судження «це вибір, а не баг» поки робить людина, що викликає `mt escalate`.
-6. **M3 / M5 / M4.** Dashboard і поверхні (`client_kind: mt-dashboard` ✅ — стрічка графа є; лишається `surfaces.md`: профілі поверхонь, MCP, preview/`ContextSelected`); retro (MVP не чекає M1–M4 — дані вже є); файловий шар i18n.
+6. **M3 / M5 / M4.** Dashboard і поверхні (`client_kind: mt-dashboard` ✅, surface-профілі + `ContextSelected` ✅; лишаються MCP-сервери — вони впираються в secrets-брокер — і preview-модуль); retro (MVP не чекає M1–M4 — дані вже є); файловий шар i18n.
 
 ## Закриті питання
 
