@@ -309,3 +309,15 @@ test('у продакшн-режимі кадр login відмовляє за п
   socket.close()
   await prod.close()
 })
+
+test('set_push_token: пристрій реєструє і знімає токен транспорту', async () => {
+  const socket = await connect()
+  const hello = await roundtrip(socket, { kind: 'hello', device_token: hostToken })
+  const set = await roundtrip(socket, { kind: 'set_push_token', push_token: 'fcm-abc' })
+  expect(set).toEqual({ kind: 'ok', push_token: true })
+  expect(await store.pushTokensFor(owner.account_id)).toEqual([{ device_id: hello.device_id, push_token: 'fcm-abc' }])
+
+  await roundtrip(socket, { kind: 'set_push_token', push_token: '' })
+  expect(await store.pushTokensFor(owner.account_id)).toEqual([])
+  socket.close()
+})

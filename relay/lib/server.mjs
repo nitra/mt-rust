@@ -5,6 +5,7 @@
  * `{kind:"register_device", session_token, name, role, pubkey}`, далі
  * `{kind:"hello", device_token}`,
  * `{kind:"subscribe", root}`, `{kind:"envelope", root, envelope}`,
+ * `{kind:"set_push_token", push_token}`,
  * membership-операції (`invite`, `accept`, `decline`, `transfer_ownership`
  * з Ed25519-підписом акта, `bootstrap_owners`);
  * relay → `{kind:"ok"|"error", ...}`, `{kind:"envelope"|"event", ...}`.
@@ -58,6 +59,13 @@ async function handleFrame(core, state, frame, send) {
     }
     case 'envelope': {
       await core.clientEnvelope(state.device, frame.root, frame.envelope)
+      break
+    }
+    case 'set_push_token': {
+      // Registration token транспорту push; пристрій оновлює його стільки
+      // разів, скільки транспорт його змінить.
+      await core.setPushToken(state.device, frame.push_token)
+      send({ kind: 'ok', push_token: Boolean(frame.push_token) })
       break
     }
     case 'pubkeys': {

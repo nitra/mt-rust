@@ -247,26 +247,99 @@ describe('push', () => {
 
   beforeEach(async () => {
     sink = new DevPushSink()
-    pushCore = new RelayCore({ store, push: new PushRouter({ store, sink }) })
+    pushCore = new RelayCore({ store })
+    pushCore.push = new PushRouter({ store, sink, rooms: pushCore.rooms })
   })
 
   test('invite: тип 2 зареєстрованому акаунту; незареєстрований email — тихо', async () => {
     await pushCore.invite(accounts.owner.account_id, 'root-1', { email: 'viewer@x', role: 'host' })
     await pushCore.invite(accounts.owner.account_id, 'root-1', { email: 'ghost@x', role: 'host' })
     expect(sink.deliveries).toEqual([
-      { account_id: accounts.viewer.account_id, root: 'root-1', reason: 'invited', ref: null }
+      { account_id: accounts.viewer.account_id, type: 2, root: 'root-1', reason: 'invited', ref: null }
     ])
   })
 
-  test('attention-подія будить учасників, крім автора; звичайні події — ні', async () => {
+  test('attention-подія — тип 3 учасникам, крім автора; звичайна подія — тип 1', async () => {
     await pushCore.clientEnvelope(devices.owner, 'root-1', {
       seq: 0,
       event: { type: 'PlanReview', plan_ref: 'plan_001' }
     })
+    const attention = sink.deliveries.filter(d => d.type === 3)
+    expect(attention.map(d => d.account_id).toSorted()).toEqual(
+      [accounts.approver.account_id, accounts.viewer.account_id].toSorted()
+    )
+    expect(attention.every(d => d.reason === 'PlanReview' && d.ref === 'plan_001')).toBe(true)
+
+    sink.deliveries.length = 0
     await pushCore.clientEnvelope(devices.owner, 'root-1', { seq: 1, event: { type: 'NodeState', state: 'running' } })
-    const awakened = sink.deliveries.map(d => d.account_id).toSorted()
-    expect(awakened).toEqual([accounts.approver.account_id, accounts.viewer.account_id].toSorted())
-    expect(sink.deliveries.every(d => d.reason === 'PlanReview' && d.ref === 'plan_001')).toBe(true)
+    expect(sink.deliveries.every(d => d.type === 1 && d.reason === 'new-events')).toBe(true)
+    expect(sink.deliveries.map(d => d.account_id).toSorted()).toEqual(
+      [accounts.approver.account_id, accounts.viewer.account_id].toSorted()
+    )
+  })
+
+  test('тип 1 не будить того, хто підписаний на кімнату', async () => {
+    // Push існує, щоб розбудити НЕпідключене: пристрою з живою підпискою
+    // подія вже прийшла кадром, і push поверх неї — чистий шум.
+    await pushCore.subscribe(devices.viewer, 'root-1', () => {})
+    await pushCore.clientEnvelope(devices.owner, 'root-1', { seq: 4, event: { type: 'NodeState', state: 'running' } })
+    expect(sink.deliveries.map(d => d.account_id)).toEqual([accounts.approver.account_id])
+  })
+
+  test('тип 1 дедуплікується вікном: серія подій — один push', async () => {
+    let clock = 0
+    const throttled = new RelayCore({
+      store,
+      push: new PushRouter({ store, sink, wakeCooldownMs: 1000, now: () => clock })
+    })
+    for (let seq = 0; seq < 5; seq += 1) {
+      await throttled.clientEnvelope(devices.owner, 'root-1', { seq, event: { type: 'NodeState', state: 'running' } })
+      clock += 100
+    }
+    expect(sink.deliveries.filter(d => d.account_id === accounts.viewer.account_id)).toHaveLength(1)
+
+    // Поза вікном — знову можна.
+    clock += 1000
+    await throttled.clientEnvelope(devices.owner, 'root-1', { seq: 9, event: { type: 'NodeState', state: 'running' } })
+    expect(sink.deliveries.filter(d => d.account_id === accounts.viewer.account_id)).toHaveLength(2)
+  })
+
+  test('pending: тип 3 лише для h.md-assignee з notify, інакше нікого не будить', async () => {
+    // Без notify кожен вузол, що став до черги, будив би всю кімнату.
+    await pushCore.clientEnvelope(devices.owner, 'root-1', {
+      seq: 5,
+      event: {
+        type: 'NodeState',
+        state: 'pending',
+        notify: true,
+        to_account_id: accounts.approver.account_id,
+        fact_ref: 'node-7'
+      }
+    })
+    expect(sink.deliveries).toEqual([
+      {
+        account_id: accounts.approver.account_id,
+        type: 3,
+        root: 'root-1',
+        reason: 'NodeState',
+        ref: 'node-7'
+      }
+    ])
+
+    sink.deliveries.length = 0
+    await pushCore.clientEnvelope(devices.owner, 'root-1', {
+      seq: 6,
+      event: { type: 'NodeState', state: 'pending', to_account_id: accounts.approver.account_id }
+    })
+    expect(sink.deliveries.filter(d => d.type === 3)).toEqual([])
+  })
+
+  test('unresolvable — тип 3 усім, крім автора', async () => {
+    await pushCore.clientEnvelope(devices.owner, 'root-1', {
+      seq: 7,
+      event: { type: 'NodeState', state: 'unresolvable', reason_ref: 'unresolvable.md' }
+    })
+    expect(sink.deliveries.map(d => d.type)).toEqual([3, 3])
   })
 
   test('Escalation: адресний push лише to_account_id; без резолву — нікому', async () => {
@@ -287,8 +360,9 @@ describe('push', () => {
     expect(sink.deliveries).toEqual([
       {
         account_id: accounts.approver.account_id,
+        type: 3,
         root: 'root-1',
-        reason: 'escalation',
+        reason: 'Escalation',
         ref: 'escalation_001.md'
       }
     ])

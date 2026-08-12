@@ -56,6 +56,20 @@ export class RelayCore {
   }
 
   /**
+   * Записує registration token транспорту push для підключеного пристрою.
+   *
+   * Окремий крок після `hello`, а не поле реєстрації: FCM-токен видає сам
+   * транспорт і змінює його самостійно (перевстановлення застосунку,
+   * ротація), тож пристрій оновлює його стільки разів, скільки треба.
+   * @param {object} device запис підключеного пристрою
+   * @param {string} pushToken токен транспорту (порожній — зняти)
+   * @returns {Promise<void>} завершення запису
+   */
+  async setPushToken(device, pushToken) {
+    await this.store.setPushToken(device.device_id, pushToken)
+  }
+
+  /**
    * Авторизує WS-підключення за device_token.
    * @param {string} deviceToken токен пристрою
    * @returns {object} запис пристрою
@@ -80,7 +94,9 @@ export class RelayCore {
   async subscribe(device, root, send) {
     const role = await this.store.memberRole(root, device.account_id)
     if (!role) throw new Error(`subscribe відхилено: акаунт не учасник задачі ${root}`)
-    return this.rooms.subscribe(root, { deviceId: device.device_id, send })
+    // accountId у підписці — не декор: push типу 1 будить лише офлайнових,
+    // а «офлайн» визначається саме наявністю живої підписки акаунта.
+    return this.rooms.subscribe(root, { deviceId: device.device_id, accountId: device.account_id, send })
   }
 
   /**
@@ -108,8 +124,7 @@ export class RelayCore {
   }
 
   /**
-   * Запрошення учасника (лише owner). Push отримувачу — окремий модуль
-   * (заглушка до FCM-задачі).
+   * Запрошення учасника (лише owner). Push отримувачу — тип 2 (push.mjs).
    * @param {string} ownerAccount акаунт-запрошувач
    * @param {string} root кореневий вузол задачі
    * @param {{ email: string, role: string }} params кого і з якою роллю

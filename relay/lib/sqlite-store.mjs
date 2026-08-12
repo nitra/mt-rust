@@ -26,6 +26,14 @@ import { roleAtLeast } from './store.mjs'
 
 const SCHEMA_PATH = join(dirname(fileURLToPath(import.meta.url)), 'schema.sql')
 
+/**
+ * Колонки, додані до `schema.sql` після першого релізу store. Кожен рядок
+ * лишається тут назавжди: база могла бути створена на будь-якій попередній
+ * версії, і пропуск проміжного кроку зробив би міграцію непослідовною.
+ * @type {[string, string, string][]}
+ */
+const ADDED_COLUMNS = [['devices', 'push_token', "TEXT NOT NULL DEFAULT ''"]]
+
 /** ISO8601 — той самий формат часу, що і в in-memory реалізації. */
 function now() {
   return new Date().toISOString()
@@ -47,11 +55,24 @@ export class SqliteStore {
   }
 
   /**
-   * Застосовує схему (ідемпотентно).
+   * Застосовує схему (ідемпотентно) і добудовує колонки, доданої після
+   * того, як база вже існувала.
+   *
+   * `CREATE TABLE IF NOT EXISTS` наздоганяє лише нові таблиці: на базі, що
+   * вже створена, нова колонка з `schema.sql` не зʼявиться мовчки — і
+   * запити падатимуть на «no such column». Відколи store персистентний, це
+   * перестало бути теорією, тож додавання колонок іде окремим явним
+   * списком; SQLite не має `ADD COLUMN IF NOT EXISTS`, тому наявність
+   * перевіряється через `PRAGMA table_info`.
    * @returns {void}
    */
   migrate() {
     this.db.exec(readFileSync(SCHEMA_PATH, 'utf8'))
+    for (const [table, column, definition] of ADDED_COLUMNS) {
+      const columns = this.db.query(`PRAGMA table_info(${table})`).all()
+      if (columns.some(existing => existing.name === column)) continue
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+    }
   }
 
   /**
@@ -117,6 +138,28 @@ export class SqliteStore {
    */
   async deviceByToken(token) {
     return this.db.query('SELECT * FROM devices WHERE device_token = ?').get(token ?? '') ?? null
+  }
+
+  /**
+   * Записує registration token транспорту push для пристрою.
+   * @param {string} deviceId пристрій
+   * @param {string} pushToken токен транспорту (порожній — зняти)
+   * @returns {Promise<void>} завершення запису
+   */
+  async setPushToken(deviceId, pushToken) {
+    this.db.query('UPDATE devices SET push_token = ? WHERE device_id = ?').run(String(pushToken ?? ''), deviceId)
+  }
+
+  /**
+   * Push-токени всіх пристроїв акаунта. Пристрої без токена (headless-хост,
+   * тест) не потрапляють у вибірку — доставляти нема куди.
+   * @param {string} accountId акаунт
+   * @returns {Promise<{device_id: string, push_token: string}[]>} токени
+   */
+  async pushTokensFor(accountId) {
+    return this.db
+      .query("SELECT device_id, push_token FROM devices WHERE account_id = ? AND push_token <> ''")
+      .all(accountId)
   }
 
   /**

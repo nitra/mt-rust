@@ -73,6 +73,27 @@ function storeContract(label, makeStore) {
       ).rejects.toThrow(/hex/)
     })
 
+    test('push-токен пристрою: записується, знімається, не тече між акаунтами', async () => {
+      const store = await makeStore()
+      const one = await store.createAccount({ email: `p1-${Date.now()}@x` })
+      const two = await store.createAccount({ email: `p2-${Date.now()}@x` })
+      const device = await store.registerDevice(one.account_id, { name: 'phone', role: 'client', pubkey: key('p') })
+      await store.registerDevice(two.account_id, { name: 'other', role: 'client', pubkey: key('o') })
+
+      // Пристрій без токена не потрапляє у вибірку — доставляти нема куди.
+      expect(await store.pushTokensFor(one.account_id)).toEqual([])
+
+      await store.setPushToken(device.device_id, 'fcm-token')
+      expect(await store.pushTokensFor(one.account_id)).toEqual([
+        { device_id: device.device_id, push_token: 'fcm-token' }
+      ])
+      expect(await store.pushTokensFor(two.account_id)).toEqual([])
+
+      // Порожній рядок — зняти (протухлий токен після 404 від FCM).
+      await store.setPushToken(device.device_id, '')
+      expect(await store.pushTokensFor(one.account_id)).toEqual([])
+    })
+
     test('createTask робить власника owner автоматично', async () => {
       const store = await makeStore()
       const owner = await store.createAccount({ email: `o-${Date.now()}@x` })
@@ -185,6 +206,46 @@ describe('sqlite: персистентність', () => {
         account_id: owner.account_id
       })
       reopened.close()
+    } finally {
+      rmSync(file, { force: true })
+      rmSync(`${file}-wal`, { force: true })
+      rmSync(`${file}-shm`, { force: true })
+    }
+  })
+})
+
+describe('sqlite: міграція існуючої бази', () => {
+  test('колонка, додана після створення бази, добудовується', async () => {
+    // `CREATE TABLE IF NOT EXISTS` наздоганяє лише нові таблиці. Відколи
+    // store персистентний, база на диску переживає релізи — і без явного
+    // ALTER запити падали б на «no such column».
+    const { Database } = await import('bun:sqlite')
+    const file = join(tmpdir(), `relay-migrate-${randomUUID()}.sqlite`)
+    try {
+      // База «попередньої версії»: devices без push_token.
+      const legacy = new Database(file, { create: true })
+      legacy.exec(`
+        CREATE TABLE accounts (account_id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT '');
+        CREATE TABLE devices (
+          device_id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
+          name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL, pubkey TEXT NOT NULL,
+          device_token TEXT NOT NULL UNIQUE, last_seen TEXT
+        );
+      `)
+      legacy.query('INSERT INTO accounts (account_id, email) VALUES (?, ?)').run('acc-1', 'legacy@x')
+      legacy
+        .query('INSERT INTO devices (device_id, account_id, role, pubkey, device_token) VALUES (?, ?, ?, ?, ?)')
+        .run('dev-1', 'acc-1', 'client', key('legacy'), 'tok-1')
+      legacy.close()
+
+      const store = await createSqliteStore(file)
+      // Наявні дані на місці, нова колонка працює.
+      expect(await store.accountByEmail('legacy@x')).toMatchObject({ account_id: 'acc-1' })
+      expect(await store.pushTokensFor('acc-1')).toEqual([])
+      await store.setPushToken('dev-1', 'fcm-1')
+      expect(await store.pushTokensFor('acc-1')).toEqual([{ device_id: 'dev-1', push_token: 'fcm-1' }])
+      store.close()
     } finally {
       rmSync(file, { force: true })
       rmSync(`${file}-wal`, { force: true })

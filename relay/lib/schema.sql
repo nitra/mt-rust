@@ -27,6 +27,10 @@ CREATE TABLE IF NOT EXISTS devices (
   -- hex Ed25519 (32 байти) — той самий формат, що очікує pubkey-кеш хоста.
   pubkey       TEXT NOT NULL,
   device_token TEXT NOT NULL UNIQUE,
+  -- Registration token транспорту push (FCM). Змінюється самим транспортом,
+  -- тому це окреме поле, а не частина реєстрації пристрою; порожній рядок —
+  -- пристрій без push (headless-хост, тест).
+  push_token   TEXT NOT NULL DEFAULT '',
   last_seen    TEXT
 );
 
