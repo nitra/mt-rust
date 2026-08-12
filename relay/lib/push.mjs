@@ -26,8 +26,8 @@ export class PushRouter {
    * @param {string} root кореневий вузол задачі
    * @returns {boolean} true якщо доставлено (акаунт існує)
    */
-  invited(email, root) {
-    const account = this.store.accountByEmail(email)
+  async invited(email, root) {
+    const account = await this.store.accountByEmail(email)
     if (!account) return false
     this.sink.deliver(account.account_id, { root, reason: 'invited' })
     return true
@@ -42,7 +42,7 @@ export class PushRouter {
    * @param {string} senderAccount акаунт-автор конверта
    * @returns {void}
    */
-  onEnvelope(root, envelope, senderAccount) {
+  async onEnvelope(root, envelope, senderAccount) {
     const event = envelope?.event
     if (!event) return
     const attention = ATTENTION_TYPES.has(event.type) || (event.type === 'NodeState' && event.state === 'unresolvable')
@@ -58,7 +58,7 @@ export class PushRouter {
       return
     }
 
-    for (const member of this.store.membersOf(root)) {
+    for (const member of await this.store.membersOf(root)) {
       if (member.account_id === senderAccount) continue
       this.sink.deliver(member.account_id, { root, reason: event.type, ref })
     }

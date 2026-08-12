@@ -29,7 +29,6 @@ use tokio::io::AsyncBufReadExt;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
-
 /// Інтервал fallback-прокидання оркестратора, коли relay мовчить.
 const WAKE_FALLBACK_SEC: u64 = 300;
 
@@ -39,6 +38,7 @@ fn state_dir(cli_dir: Option<PathBuf>) -> PathBuf {
     })
 }
 
+/// Параметри команди `mt serve`.
 #[derive(Args)]
 pub struct ServeArgs {
     /// Директорія discovery/стану (дефолт — ~/.nitra).
@@ -64,6 +64,7 @@ pub struct ServeArgs {
     pub no_orchestrator: bool,
 }
 
+/// Параметри команди `mt attach`.
 #[derive(Args)]
 pub struct AttachArgs {
     /// Вузол (шлях у tasks-директорії).
@@ -89,6 +90,7 @@ fn block_on<F: std::future::Future<Output = Result<(), Box<dyn std::error::Error
         .map_err(|e| e.to_string())
 }
 
+/// Запускає команду `mt serve`.
 pub fn run_serve_cmd(args: ServeArgs, _json: bool) -> Result<(), String> {
     let relay = args.relay_url.clone().map(|url| RelayBridgeConfig {
         url,
@@ -104,12 +106,9 @@ pub fn run_serve_cmd(args: ServeArgs, _json: bool) -> Result<(), String> {
     ))
 }
 
+/// Запускає команду `mt attach`.
 pub fn run_attach_cmd(args: AttachArgs, _json: bool) -> Result<(), String> {
-    block_on(run_attach(
-        state_dir(args.state_dir),
-        args.node,
-        args.lang,
-    ))
+    block_on(run_attach(state_dir(args.state_dir), args.node, args.lang))
 }
 
 async fn run_serve(
@@ -188,7 +187,9 @@ async fn run_serve(
             let mut wake = Wake::new(&project_root, Duration::from_secs(WAKE_FALLBACK_SEC));
             state.set_wake(wake.signaller());
             let tasks_dir = tasks_dir.to_string_lossy().into_owned();
-            println!("orchestrator: {tasks_dir} (wake: relay push | .mt/wake | {WAKE_FALLBACK_SEC}s)");
+            println!(
+                "orchestrator: {tasks_dir} (wake: relay push | .mt/wake | {WAKE_FALLBACK_SEC}s)"
+            );
             Some(std::thread::spawn(move || {
                 let mut orch = Orchestrator::new(tasks_dir, 5);
                 loop {
