@@ -13,6 +13,8 @@ pub mod graph;
 pub mod lifecycle;
 /// Підкоманда `mt plan`.
 pub mod plan;
+/// Підкоманда `mt retro`.
+pub mod retro;
 /// Підкоманда `mt run`.
 pub mod run;
 /// Підкоманда `mt session`.
