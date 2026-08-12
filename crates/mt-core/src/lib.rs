@@ -42,6 +42,9 @@ pub mod runner;
 pub mod signal;
 /// Протокол spawn: валідація `## Children` плану й матеріалізація дітей після plan-review.
 pub mod spawn;
+
+/// Surface-профілі: резолюція режиму ходу, стеля скілів, context kinds.
+pub mod surfaces;
 /// Тестові фікстури: версійні git-фіксації (bare `origin` + клон) для ізольованих тестів.
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]

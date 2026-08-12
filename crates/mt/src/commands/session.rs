@@ -180,6 +180,11 @@ async fn run_serve(
     if tasks_dir.is_dir() {
         state = state.with_graph(GraphConfig::new(tasks_dir));
     }
+    // Surface-профілі (surfaces.md) — з конфігу проєкту; без секції хост
+    // поводиться рівно як до їх появи.
+    let project_config =
+        mt_core::config::merge_config(std::fs::read_to_string(".mt.json").ok().as_deref());
+    state = state.with_surface_profiles(&project_config);
     let state = Arc::new(state);
     let (addr, handle) = serve(Arc::clone(&state), format!("127.0.0.1:{port}").parse()?).await?;
     let discovery = Discovery::new(dir);

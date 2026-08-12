@@ -52,6 +52,12 @@ pub struct AppState {
     /// швидкі й локальні — виконуються під локом (spawn_blocking — TODO
     /// разом із віддаленими remote).
     runs: tokio::sync::Mutex<HashMap<String, InteractiveRun>>,
+    /// Surface останнього ходу кожної кімнати — липкість зі спеки
+    /// (`surfaces.md`: «Без hint — профіль попереднього ходу»).
+    surfaces: tokio::sync::Mutex<HashMap<String, String>>,
+    /// Профілі surface із `.mt.json`. Порожньо — surface не налаштовані,
+    /// і хост поводиться рівно як до їх появи.
+    surface_profiles: std::collections::BTreeMap<String, mt_core::surfaces::SurfaceProfile>,
     /// Хто чекає на `HandoffAck` (цей хост попросив вузол «сюди»).
     /// Наявність запису тут — і є ознака «ack адресований нам»: у кімнаті
     /// подія широкомовна, і власний ack емітента відсіюється саме тим, що
@@ -104,8 +110,50 @@ impl AppState {
             wake: std::sync::Mutex::new(None),
             graph: None,
             runs: tokio::sync::Mutex::new(HashMap::new()),
+            surfaces: tokio::sync::Mutex::new(HashMap::new()),
+            surface_profiles: std::collections::BTreeMap::new(),
             handoff_waiters: tokio::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Підвантажує surface-профілі з конфігу проєкту.
+    #[must_use]
+    pub fn with_surface_profiles(mut self, config: &serde_json::Value) -> Self {
+        self.surface_profiles = mt_core::surfaces::surface_profiles(config);
+        self
+    }
+
+    /// Профіль surface за назвою (порожній профіль, якщо не налаштований —
+    /// «немає профілю» і «профіль без полів» для ходу однакові).
+    pub fn surface_profile(&self, surface: &str) -> mt_core::surfaces::SurfaceProfile {
+        self.surface_profiles
+            .get(surface)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Резолюція surface ходу з урахуванням липкості; запамʼятовує вибір.
+    pub async fn resolve_turn_surface(
+        &self,
+        node: &str,
+        hint: Option<&str>,
+        client_kind: &str,
+    ) -> Option<String> {
+        let mut sticky = self.surfaces.lock().await;
+        let resolved = mt_core::surfaces::resolve_surface(
+            hint,
+            sticky.get(node).map(String::as_str),
+            client_kind,
+        );
+        if let Some(surface) = &resolved {
+            sticky.insert(node.to_string(), surface.clone());
+        }
+        resolved
+    }
+
+    /// Surface, у якому йшов останній хід кімнати.
+    pub async fn current_surface(&self, node: &str) -> Option<String> {
+        self.surfaces.lock().await.get(node).cloned()
     }
 
     /// Mid-run approval-гейт: шле `ApprovalRequest` у кімнату і повертає
@@ -421,8 +469,10 @@ async fn client_connection(mut socket: WebSocket, state: Arc<AppState>) {
                     // інлайн-обробка дала б deadlock.
                     let state = Arc::clone(&state);
                     let device_id = hello.device_id;
+                    let client_kind = hello.client_kind.clone();
                     tokio::spawn(async move {
-                        handle_client_frame(&state, text.as_str(), Some(device_id)).await;
+                        handle_client_frame(&state, text.as_str(), Some(device_id), &client_kind)
+                            .await;
                     });
                 }
                 Some(Ok(Message::Close(_))) | None => break,
@@ -493,6 +543,7 @@ pub(crate) async fn handle_client_frame(
     state: &Arc<AppState>,
     frame: &str,
     device_id: Option<Uuid>,
+    client_kind: &str,
 ) {
     let Ok(envelope) = serde_json::from_str::<Envelope>(frame) else {
         return;
@@ -530,16 +581,31 @@ pub(crate) async fn handle_client_frame(
         return;
     };
     match envelope.event {
-        Event::UserMessage { text, .. } => {
+        Event::UserMessage { text, surface, .. } => {
+            let resolved = state
+                .resolve_turn_surface(&node, surface.as_deref(), client_kind)
+                .await;
             handle_user_message(
                 state,
                 &session,
                 &node,
                 &text,
+                resolved,
                 device_id,
                 envelope.account_id,
             )
             .await;
+        }
+        // Гейт `context_kinds` (surfaces.md): режим, який не інтерпретує
+        // цей kind, мусить відмовити ЯВНО. Мовчазна втрата події тут
+        // найгірша з можливих: клієнт вважає, що контекст доїхав, агент
+        // його не бачить, і розходження нічим не видно.
+        Event::ContextSelected { kind, .. } => {
+            let surface = state.current_surface(&node).await.unwrap_or_default();
+            let profile = state.surface_profile(&surface);
+            if let Err(error) = mt_core::surfaces::check_context_kind(&surface, &profile, &kind) {
+                publish_error(state, &session, error.to_string());
+            }
         }
         Event::HandoffPull { node_hash } => handle_handoff_pull(state, node_hash).await,
         Event::DoneSession {} => handle_done(state, &session, &node).await,
@@ -593,15 +659,19 @@ async fn handle_user_message(
     session: &Arc<Session>,
     node: &str,
     text: &str,
+    surface: Option<String>,
     device_id: Option<Uuid>,
     account_id: Option<Uuid>,
 ) {
+    // Ехо несе **резолвлений** surface, а не той, що прийшов від клієнта:
+    // раніше тут стояло `None`, і режим ходу зникав зі стрічки — інші
+    // клієнти й журнал не бачили, у якому режимі хід узагалі йшов.
     state.sessions.publish(
         session,
         Event::UserMessage {
             text: text.to_string(),
             attachments: vec![],
-            surface: None,
+            surface: surface.clone(),
         },
         device_id,
         account_id,
