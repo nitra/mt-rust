@@ -216,6 +216,28 @@ impl SessionHost {
         envelope
     }
 
+    /// Broadcast БЕЗ запису в журнал — для подій, адресованих іншому хосту
+    /// (`HandoffRequest`).
+    ///
+    /// Чому не звичайний `publish`: журнал належить run-у, а хост, який
+    /// лише **просить** вузол, run-а не має. Запис туди відкрив би локальну
+    /// сесію вузла — і наступний `seed_journal` при відновленні відмовився б
+    /// сіяти успадкований журнал («сесія вже відкрита»), тобто прохач
+    /// отримав би вузол із чистою стрічкою замість історії.
+    pub fn broadcast_only(&self, node_hash: &str, event: Event) -> Envelope {
+        let envelope = Envelope {
+            seq: 0,
+            ts: chrono::Utc::now(),
+            node_hash: node_hash.to_string(),
+            run_token: Uuid::nil(),
+            device_id: None,
+            account_id: None,
+            event,
+        };
+        let _ = self.broadcast.send(envelope.clone());
+        envelope
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<Envelope> {
         self.broadcast.subscribe()
     }

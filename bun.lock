@@ -5,7 +5,7 @@
     "": {
       "name": "mt-rust-mono",
       "devDependencies": {
-        "@7n/mt": "^0.30.1",
+        "@7n/mt": "^0.30.8",
         "@7n/rules": "^1.55.3",
         "@7n/rules-ci-github": "^1.9.0",
         "@7n/rules-lang-js": "^0.9.0",
@@ -49,7 +49,7 @@
 
     "@7n/llm-lib-linux-x64": ["@7n/llm-lib-linux-x64@2.8.3", "", { "os": "linux", "cpu": "x64" }, "sha512-q21Pc86jI7lC+rc+ai24nNe+c2ng8DU5CNuPU7t1wC/xmSWWZ+k0XuSMxJvGzHmHh/ARoEyphIECbYC13l6iSw=="],
 
-    "@7n/mt": ["@7n/mt@0.30.1", "", {}, "sha512-7/v5jjB53jA/YBaAot2VcIQisSonLuhxDIMx6MutL5ZFaBpf3Fp6uYsP2I3S11++bG6z2yW6yDXnknQVD13xjQ=="],
+    "@7n/mt": ["@7n/mt@0.30.8", "", {}, "sha512-wyDQJQhdNkblodGDrD1LEg5d8yzrUNTAlmL2nyMNKS/t7QnnMCKBs37sDw4EB4wdll8fQ/qqsh/nF9s6QlPdPg=="],
 
     "@7n/relay": ["@7n/relay@workspace:relay"],
 

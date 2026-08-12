@@ -48,6 +48,8 @@ enum Command {
     Serve(commands::session::ServeArgs),
     /// Інтерактивна сесія з вузлом через запущений `mt serve`.
     Attach(commands::session::AttachArgs),
+    /// «Перенести сюди»: забрати вузол у поточного тримача через relay.
+    Handoff(commands::session::HandoffArgs),
     /// Зупинити виконання піддерева (running-маркери, від листів).
     Stop(commands::lifecycle::StopArgs),
     /// Вердикт аудитора: закриває цикл (`audit-result_NNN.md`).
@@ -97,6 +99,7 @@ fn main() {
         Command::Failed(args) => commands::signal::run_failed(args, json),
         Command::Serve(args) => commands::session::run_serve_cmd(args, json),
         Command::Attach(args) => commands::session::run_attach_cmd(args, json),
+        Command::Handoff(args) => commands::session::run_handoff_cmd(args, json),
         Command::Stop(args) => commands::lifecycle::run_stop(args, json),
         Command::Verdict(args) => commands::audit::run_verdict(args, json),
         Command::Clarify(args) => commands::audit::run_clarify(args, json),

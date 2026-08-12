@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | M0 — dogfood ядра | цикл замкнено | recurrence; secrets broker; телеметрія вартості |
 | M1 — agent-server | ✅ закрито | — |
-| M2 — mission control | частково | handoff між машинами через relay, presence, зміна ролі/видалення учасника |
+| M2 — mission control | частково | presence, зміна ролі/видалення учасника, ротація/revocation ключів, checkpoint-handoff |
 | M3 — dashboard і поверхні | не починався | surface-профілі, MCP-сервери, preview/`ContextSelected`, `client_kind: mt-dashboard` |
 | M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |
 | M5 — мета-цикл retro | не починався | увесь рушій; дані для нього вже накопичуються |
@@ -68,7 +68,7 @@
 | WS-транспорт, capability-фільтр, backpressure | РЕАЛІЗОВАНО | `agent-server/ws.rs` (наздоганяння журнальованих на `Lagged`, disconnect з `Error`, `MAX_FRAME_BYTES`) | — |
 | Discovery / single-instance | ЧАСТКОВО | `agent-server/discovery.rs` | Живої перевірки stale-lock немає |
 | Інтерактивний run = run вузла | РЕАЛІЗОВАНО | `agent-server/graph.rs` | Інтерактивні політики (`progress_timeout_sec`), телеметрія ходів |
-| Handoff між хостами | ЧАСТКОВО | `agent-server/graph.rs`, `ws.rs` | Немає `HandoffRequest` як події й доставки через relay; немає checkpoint-режиму |
+| Handoff між хостами | ЧАСТКОВО | `agent-protocol` `HandoffRequest`/`HandoffAck`/`HandoffPull`; `agent-server/ws.rs` `pull_node`/`serve_handoff_request`, доставка — `relay_client.rs` (виняток host↔host з анти-циклу); CLI — `mt handoff` | Checkpoint-режим (`mt handoff --checkpoint`, git.md): дистильований summary + archive ref для повного журналу |
 | Approvals-гейт mid-run + матеріалізація | РЕАЛІЗОВАНО | `agent-server/approvals_gate.rs` `ApprovalRecord::to_yaml_line`; запис — `ws.rs` → `InteractiveRun::add_approval` → `run_NNN.md` | — |
 | ACP-транспорт | РЕАЛІЗОВАНО | `agent-core/acp.rs` | `mcpServers` жорстко порожній |
 | Orchestrator-роль у agent-server + wake | РЕАЛІЗОВАНО | `agent-server/orchestrator.rs` `Wake`/`Orchestrator::tick`; relay push → `AppState::wake_orchestrator` | — |
@@ -111,7 +111,7 @@
 1. **Контрактний борг — ✅ закрито.** `failed_streak` (категорія + межа), формат `a.md`/`h.md`, видалення `mt-napi`, `schema_version` fail-closed, гейт immutability, дефолти `.mt.json`, `orphan-node`, матеріалізація `result: merge-conflict`.
 2. **Замкнути M0 як автономний цикл — ✅ закрито.** `unresolvable` з трьома тригерами, контекст агента, `run-summary.md`, git-протокол `spawn`/`invalidate`/`kill` з re-run семантикою і `mt stop`, аудит-цикл разом із агентом-аудитором, Stage 1, EngineerAgent. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах. Хвости, що належать orchestrator-ролі хвилі 3: алерт при `unresolvable` і тригери аудиту за розкладом (`audit_schedule_days`/`audit_on_patch`).
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
-4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт ✅, `HandoffRequest` через relay, presence.
+4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт ✅, `HandoffRequest` через relay ✅, presence.
 5. **M6 фаза 0 — модельний трек Дельти.** Паралельно від хвилі 2, як велить roadmap: `mandates.yaml` (включно з `kind: model` і `audacity`), `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision`, квіз-гейт, конверсія вичерпаної драбини в розвилку. Соціальних ризиків нема — механіка обкатується на моделях.
 6. **M3 / M5 / M4.** Dashboard і поверхні; retro (MVP не чекає M1–M4 — дані вже є); файловий шар i18n.
 

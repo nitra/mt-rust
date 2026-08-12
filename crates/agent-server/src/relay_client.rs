@@ -21,6 +21,12 @@ use uuid::Uuid;
 
 use crate::ws::{handle_client_frame, AppState};
 
+/// Події хост↔хост, для яких анти-цикл не діє: обидві сторони міграції
+/// сесії — хости (runtime.md, «Міграція сесії між хостами»), тож правило
+/// «ігноруй усе з `from_host`» відрізало б їх повністю. Список свідомо
+/// закритий: усе інше з `from_host` лишається ехом.
+const HOST_TO_HOST: [&str; 2] = ["HandoffRequest", "HandoffAck"];
+
 /// Конфіг моста до relay.
 #[derive(Debug, Clone)]
 pub struct RelayBridgeConfig {
@@ -52,6 +58,10 @@ async fn run_bridge(state: &Arc<AppState>, config: &RelayBridgeConfig) -> Result
     let (mut ws, _) = tokio_tungstenite::connect_async(&config.url)
         .await
         .map_err(|error| error.to_string())?;
+    // Власний device_id relay віддає у відповідь на hello. Він потрібен
+    // рівно для одного: відсіяти власне ехо серед host↔host подій — за
+    // роллю це вже не зробити, бо обидві сторони host.
+    let mut self_device_id: Option<Uuid> = None;
 
     let hello = json!({ "kind": "hello", "device_token": config.device_token });
     ws.send(Message::text(hello.to_string()))
@@ -73,10 +83,12 @@ async fn run_bridge(state: &Arc<AppState>, config: &RelayBridgeConfig) -> Result
         tokio::select! {
             update = updates.recv() => match update {
                 Ok(envelope) => {
+                    let mut payload = serde_json::to_value(&envelope).unwrap();
+                    stamp_origin(&mut payload, self_device_id);
                     let frame = json!({
                         "kind": "envelope",
                         "root": config.root,
-                        "envelope": serde_json::to_value(&envelope).unwrap(),
+                        "envelope": payload,
                     });
                     ws.send(Message::text(frame.to_string()))
                         .await
@@ -88,7 +100,10 @@ async fn run_bridge(state: &Arc<AppState>, config: &RelayBridgeConfig) -> Result
             },
             incoming = ws.next() => match incoming {
                 Some(Ok(Message::Text(text))) => {
-                    handle_incoming(state, text.as_str()).await;
+                    if let Some(device_id) = hello_device_id(text.as_str()) {
+                        self_device_id = Some(device_id);
+                    }
+                    handle_incoming(state, text.as_str(), self_device_id).await;
                 }
                 Some(Ok(Message::Close(_))) | None => return Ok(()),
                 Some(Ok(_)) => {}
@@ -101,7 +116,42 @@ async fn run_bridge(state: &Arc<AppState>, config: &RelayBridgeConfig) -> Result
 /// Вхідний кадр relay: обробляємо лише envelope БЕЗ `from_host`
 /// (клієнтські події віддалених пристроїв); host-ехо і службові кадри
 /// (`ok`/`error`) ігноруються.
-async fn handle_incoming(state: &Arc<AppState>, text: &str) {
+/// `{kind:"ok", device_id}` у відповідь на hello → власний device_id.
+fn hello_device_id(text: &str) -> Option<Uuid> {
+    let frame = serde_json::from_str::<Value>(text).ok()?;
+    if frame.get("kind").and_then(Value::as_str) != Some("ok") {
+        return None;
+    }
+    frame
+        .get("device_id")
+        .and_then(Value::as_str)
+        .and_then(|raw| Uuid::parse_str(raw).ok())
+}
+
+/// Проставляє власний `device_id` вихідним host↔host подіям — без нього
+/// приймальна сторона не відрізнить чужий запит від власного ехо.
+fn stamp_origin(payload: &mut Value, self_device_id: Option<Uuid>) {
+    let Some(device_id) = self_device_id else {
+        return;
+    };
+    if !is_host_to_host(payload) || !payload.get("device_id").is_none_or(Value::is_null) {
+        return;
+    }
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("device_id".into(), Value::String(device_id.to_string()));
+    }
+}
+
+/// Чи є подія конверта з переліку [`HOST_TO_HOST`].
+fn is_host_to_host(envelope: &Value) -> bool {
+    envelope
+        .get("event")
+        .and_then(|event| event.get("type"))
+        .and_then(Value::as_str)
+        .is_some_and(|kind| HOST_TO_HOST.contains(&kind))
+}
+
+async fn handle_incoming(state: &Arc<AppState>, text: &str, self_device_id: Option<Uuid>) {
     let Ok(frame) = serde_json::from_str::<Value>(text) else {
         return;
     };
@@ -113,16 +163,24 @@ async fn handle_incoming(state: &Arc<AppState>, text: &str) {
         Some("envelope") => {}
         _ => return,
     }
+    let Some(envelope) = frame.get("envelope") else {
+        return;
+    };
     if frame
         .get("from_host")
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        return;
+        // Ехо власних кадрів або чужа host-стрічка — крім host↔host подій
+        // міграції, які інакше не мали б як дійти до другого хоста.
+        let origin = envelope
+            .get("device_id")
+            .and_then(Value::as_str)
+            .and_then(|raw| Uuid::parse_str(raw).ok());
+        if !is_host_to_host(envelope) || (origin.is_some() && origin == self_device_id) {
+            return;
+        }
     }
-    let Some(envelope) = frame.get("envelope") else {
-        return;
-    };
     // Push «є нові події у задачі X» (runtime.md): хост ресканить негайно,
     // не чекаючи fallback-таймера.
     state.wake_orchestrator();

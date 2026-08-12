@@ -23,6 +23,10 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+/// Скільки чекати `HandoffAck` від тримача (реалізація, не контракт):
+/// тримач мусить завершити поточний хід, закомітити й запушити run ref.
+const HANDOFF_TIMEOUT_SEC: u64 = 60;
+
 use crate::approvals_gate::ApprovalGate;
 use crate::graph::{self, GraphConfig, InteractiveRun};
 use crate::runner::TurnRunner;
@@ -48,6 +52,12 @@ pub struct AppState {
     /// швидкі й локальні — виконуються під локом (spawn_blocking — TODO
     /// разом із віддаленими remote).
     runs: tokio::sync::Mutex<HashMap<String, InteractiveRun>>,
+    /// Хто чекає на `HandoffAck` (цей хост попросив вузол «сюди»).
+    /// Наявність запису тут — і є ознака «ack адресований нам»: у кімнаті
+    /// подія широкомовна, і власний ack емітента відсіюється саме тим, що
+    /// в нього очікувача немає.
+    handoff_waiters:
+        tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<graph::HandoffTicket>>>,
 }
 
 impl AppState {
@@ -94,6 +104,7 @@ impl AppState {
             wake: std::sync::Mutex::new(None),
             graph: None,
             runs: tokio::sync::Mutex::new(HashMap::new()),
+            handoff_waiters: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -139,6 +150,93 @@ impl AppState {
             );
         }
         Ok(ticket)
+    }
+
+    /// Чи тримає цей хост активний run вузла. Джерело істини «хто пише» —
+    /// git claim; це лише локальний облік процесу.
+    pub async fn holds_node(&self, node: &str) -> bool {
+        self.runs.lock().await.contains_key(node)
+    }
+
+    /// Generation claim-а активного run-а (для `ClaimChanged` після pull).
+    pub async fn node_generation(&self, node: &str) -> Option<u64> {
+        self.runs
+            .lock()
+            .await
+            .get(node)
+            .map(InteractiveRun::generation)
+    }
+
+    /// Обробка чужого `HandoffRequest` (крок 2): якщо цей хост тримає run —
+    /// віддає його і публікує `HandoffAck` у кімнату. Якщо не тримає —
+    /// **мовчить**: спека не має відмови на цей випадок, у неї інший шлях
+    /// (крок 4 — lease expiry + grace takeover), і фальшива відмова від
+    /// не-тримача лише збила б прохача з цього шляху.
+    pub async fn serve_handoff_request(&self, node: &str) {
+        let Ok(ticket) = self.handoff_node(node).await else {
+            return;
+        };
+        if let Ok(session) = self.sessions.get_or_open(node) {
+            self.sessions.publish(
+                &session,
+                Event::HandoffAck {
+                    node_hash: node.to_string(),
+                    run_token: ticket.run_token,
+                    generation: ticket.generation,
+                },
+                None,
+                None,
+            );
+        }
+    }
+
+    /// Приймає `HandoffAck` — віддає тікет тому, хто чекає. Ack без
+    /// очікувача (у т.ч. власне ехо емітента) ігнорується.
+    pub async fn accept_handoff_ack(&self, node: &str, ticket: graph::HandoffTicket) {
+        if let Some(waiter) = self.handoff_waiters.lock().await.remove(node) {
+            let _ = waiter.send(ticket);
+        }
+    }
+
+    /// «Перенести сюди» (runtime.md, крок 1 + 3): публікує `HandoffRequest`
+    /// у кімнату, чекає `HandoffAck` до `timeout` і відновлює вузол на
+    /// цьому хості.
+    ///
+    /// Таймаут — не косметика: тримач може бути офлайн або взагалі відсутній,
+    /// і тоді штатний шлях не «висіти», а повернути помилку, з якої видно
+    /// альтернативу зі спеки — дочекатись expiry+grace і зробити takeover.
+    pub async fn pull_node(
+        self: &Arc<Self>,
+        node: &str,
+        timeout: std::time::Duration,
+    ) -> Result<(), String> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.handoff_waiters
+            .lock()
+            .await
+            .insert(node.to_string(), tx);
+
+        // Broadcast без запису в журнал: вузол ще не наш, і локальна сесія
+        // тут відкриватись не має — інакше `resume_node` не зможе засіяти
+        // успадкований журнал (session.rs, `broadcast_only`).
+        self.sessions.broadcast_only(
+            node,
+            Event::HandoffRequest {
+                node_hash: node.to_string(),
+            },
+        );
+
+        let ticket = match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(ticket)) => ticket,
+            _ => {
+                self.handoff_waiters.lock().await.remove(node);
+                return Err(format!(
+                    "handoff: тримач вузла {node} не відповів — лишається шлях MT: \
+                     дочекатись закінчення lease + grace і зробити takeover"
+                ));
+            }
+        };
+        self.resume_node(node, &ticket).await
     }
 
     /// Відновлення на цьому хості після кооперативного handoff (runtime.md,
@@ -357,6 +455,34 @@ pub(crate) async fn handle_client_frame(
         return;
     };
     let node = envelope.node_hash.clone();
+    // Пара хост↔хост (runtime.md, «Міграція сесії між хостами») —
+    // обробляється ДО `get_or_open`. Це не стиль, а необхідність: хост, який
+    // лише просить вузол, ще не має ані run-а, ані права на журнал, а
+    // відкриття сесії тут заблокувало б засів успадкованого журналу при
+    // відновленні («сесія вже відкрита»).
+    match &envelope.event {
+        Event::HandoffRequest { node_hash } => {
+            state.serve_handoff_request(node_hash).await;
+            return;
+        }
+        Event::HandoffAck {
+            node_hash,
+            run_token,
+            generation,
+        } => {
+            state
+                .accept_handoff_ack(
+                    node_hash,
+                    graph::HandoffTicket {
+                        run_token: run_token.clone(),
+                        generation: *generation,
+                    },
+                )
+                .await;
+            return;
+        }
+        _ => {}
+    }
     let Ok(session) = state.sessions.get_or_open(&node) else {
         return;
     };
@@ -372,6 +498,7 @@ pub(crate) async fn handle_client_frame(
             )
             .await;
         }
+        Event::HandoffPull { node_hash } => handle_handoff_pull(state, node_hash).await,
         Event::DoneSession {} => handle_done(state, &session, &node).await,
         Event::ReleaseSession {} => handle_release(state, &session, &node).await,
         Event::ApprovalResponse {
@@ -527,6 +654,36 @@ async fn handle_done(state: &Arc<AppState>, session: &Arc<Session>, node: &str) 
 }
 
 /// Пауза: CAS-delete claim; журнал лишається в run ref базою відновлення.
+/// `mt handoff <node>`: локальний клієнт просить цей хост забрати вузол.
+/// Результат іде у стрічку тим самим `ClaimChanged`, яким живуть усі зміни
+/// тримача — окремої «відповіді на команду» протокол не має і не потребує.
+async fn handle_handoff_pull(state: &Arc<AppState>, node: String) {
+    let timeout = std::time::Duration::from_secs(HANDOFF_TIMEOUT_SEC);
+    match state.pull_node(&node, timeout).await {
+        Ok(()) => {
+            let generation = state.node_generation(&node).await.unwrap_or_default();
+            if let Ok(session) = state.sessions.get_or_open(&node) {
+                state.sessions.publish(
+                    &session,
+                    Event::ClaimChanged {
+                        node_hash: node.clone(),
+                        holder_device_id: None,
+                        lease_until: None,
+                        generation,
+                    },
+                    None,
+                    None,
+                );
+            }
+        }
+        Err(message) => {
+            if let Ok(session) = state.sessions.get_or_open(&node) {
+                publish_error(state, &session, message);
+            }
+        }
+    }
+}
+
 async fn handle_release(state: &Arc<AppState>, session: &Arc<Session>, node: &str) {
     let Some(run) = state.runs.lock().await.remove(node) else {
         publish_error(
