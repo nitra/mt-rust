@@ -1,7 +1,9 @@
 /**
  * WS-транспорт relay: hello за device_token → subscribe/envelope-кадри.
  *
- * Кадри — JSON: клієнт → `{kind:"hello", device_token}` (перший),
+ * Кадри — JSON: pre-auth `{kind:"login", email}` (лише dev-провайдер) і
+ * `{kind:"register_device", session_token, name, role, pubkey}`, далі
+ * `{kind:"hello", device_token}`,
  * `{kind:"subscribe", root}`, `{kind:"envelope", root, envelope}`,
  * membership-операції (`invite`, `accept`, `decline`, `transfer_ownership`
  * з Ed25519-підписом акта, `bootstrap_owners`);
@@ -26,6 +28,21 @@ const FRAME_LIMIT = 2 * 1024 * 1024
  * @returns {void}
  */
 async function handleFrame(core, state, frame, send) {
+  // Три pre-auth кадри: логін і реєстрація пристрою передують hello — саме
+  // ними здобувається device_token, яким hello авторизується.
+  if (frame.kind === 'login') {
+    send({ kind: 'session', ...(await core.devLogin(frame.email)) })
+    return
+  }
+  if (frame.kind === 'register_device') {
+    const device = await core.registerDevice(frame.session_token, {
+      name: frame.name,
+      role: frame.role,
+      pubkey: frame.pubkey
+    })
+    send({ kind: 'device', ...device })
+    return
+  }
   if (frame.kind === 'hello') {
     state.device = await core.connectDevice(frame.device_token)
     send({ kind: 'ok', device_id: state.device.device_id })
