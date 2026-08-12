@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | M0 — dogfood ядра | цикл замкнено | recurrence; secrets broker; телеметрія вартості |
 | M1 — agent-server | ✅ закрито | — |
-| M2 — mission control | частково | presence, зміна ролі/видалення учасника, ротація/revocation ключів, checkpoint-handoff |
+| M2 — mission control | частково | зміна ролі/видалення учасника, ротація/revocation ключів, checkpoint-handoff, CLI `mt sessions` |
 | M3 — dashboard і поверхні | не починався | surface-профілі, MCP-сервери, preview/`ContextSelected`, `client_kind: mt-dashboard` |
 | M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |
 | M5 — мета-цикл retro | не починався | увесь рушій; дані для нього вже накопичуються |
@@ -88,7 +88,7 @@
 | Membership: зміна ролі / видалення | ВІДСУТНЄ | store-методи є, API немає | `MemberChanged {role: null}` ніколи не емітується |
 | Transfer ownership із підписом | РЕАЛІЗОВАНО | `relay/lib/relay.mjs`, `agent-protocol/transfers.rs` | — |
 | Кімнати, буфер, viewer read-only | РЕАЛІЗОВАНО | `relay/lib/rooms.mjs` | — |
-| Presence | ВІДСУТНЄ | — | Лише `last_seen` |
+| Presence | РЕАЛІЗОВАНО | `relay/lib/presence.mjs` (ефемерний реєстр із TTL), гейти й трансляція — `relay.mjs` `announcePresence`/`dropPresence`/`presenceOf`, кадри `presence`/`who`; оголошує сам хост — `agent-server/relay_client.rs` (heartbeat 30 с) | — (`mt sessions` як поверхня — окремий рядок CLI) |
 | Гейт 2 — plan-review з підписом | ЧАСТКОВО | `spawn.rs` | У фронтматері рішення немає блоку `approved_by` з підписом |
 | Гейт 3 — аудит-вердикт людини | ЧАСТКОВО | `signal.rs` | Немає блоку підпису в `audit-result_NNN.md` |
 | Push типів 1/2/3 | РЕАЛІЗОВАНО | маршрутизація — `relay/lib/push.mjs`; транспорт — `fcm-sink.mjs` (FCM HTTP v1) і `push-sink.mjs` (dev), вибір — `create-push.mjs`; контракт — `tests/push-sink-contract.test.mjs` | — (APNs окремо не робимо: FCM доставляє на iOS; доставка живим FCM не перевірена — stub-`fetch` доводить лише форму запитів) |
@@ -111,7 +111,7 @@
 1. **Контрактний борг — ✅ закрито.** `failed_streak` (категорія + межа), формат `a.md`/`h.md`, видалення `mt-napi`, `schema_version` fail-closed, гейт immutability, дефолти `.mt.json`, `orphan-node`, матеріалізація `result: merge-conflict`.
 2. **Замкнути M0 як автономний цикл — ✅ закрито.** `unresolvable` з трьома тригерами, контекст агента, `run-summary.md`, git-протокол `spawn`/`invalidate`/`kill` з re-run семантикою і `mt stop`, аудит-цикл разом із агентом-аудитором, Stage 1, EngineerAgent. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах. Хвости, що належать orchestrator-ролі хвилі 3: алерт при `unresolvable` і тригери аудиту за розкладом (`audit_schedule_days`/`audit_on_patch`).
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
-4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт ✅, `HandoffRequest` через relay ✅, presence.
+4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт ✅, `HandoffRequest` через relay ✅, presence ✅.
 5. **M6 фаза 0 — модельний трек Дельти.** Паралельно від хвилі 2, як велить roadmap: `mandates.yaml` (включно з `kind: model` і `audacity`), `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision`, квіз-гейт, конверсія вичерпаної драбини в розвилку. Соціальних ризиків нема — механіка обкатується на моделях.
 6. **M3 / M5 / M4.** Dashboard і поверхні; retro (MVP не чекає M1–M4 — дані вже є); файловий шар i18n.
 

@@ -27,6 +27,29 @@ use crate::ws::{handle_client_frame, AppState};
 /// закритий: усе інше з `from_host` лишається ехом.
 const HOST_TO_HOST: [&str; 2] = ["HandoffRequest", "HandoffAck"];
 
+/// Період повторного оголошення presence. Має бути помітно меншим за TTL
+/// реєстру relay (90 с), інакше запис протухав би між heartbeat-ами; і це
+/// не лише «оновити час» — разом із ним їде актуальний перелік активних
+/// вузлів.
+const PRESENCE_HEARTBEAT: Duration = Duration::from_secs(30);
+
+/// Імʼя машини для presence (access.md: «хости: hostname, …»).
+/// `HOSTNAME` є не в кожному середовищі, тому fallback — `hostname(1)`;
+/// якщо й це не вийшло, presence просто йде без імені, а не падає.
+fn hostname() -> String {
+    if let Ok(name) = std::env::var("HOSTNAME") {
+        if !name.is_empty() {
+            return name;
+        }
+    }
+    std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|name| name.trim().to_string())
+        .unwrap_or_default()
+}
+
 /// Конфіг моста до relay.
 #[derive(Debug, Clone)]
 pub struct RelayBridgeConfig {
@@ -79,8 +102,21 @@ async fn run_bridge(state: &Arc<AppState>, config: &RelayBridgeConfig) -> Result
         .map_err(|error| error.to_string())?;
 
     let mut updates = state.sessions.subscribe();
+    let mut heartbeat = tokio::time::interval(PRESENCE_HEARTBEAT);
     loop {
         tokio::select! {
+            _ = heartbeat.tick() => {
+                let frame = json!({
+                    "kind": "presence",
+                    "root": config.root,
+                    "hostname": hostname(),
+                    "projects": [config.root.clone()],
+                    "nodes": state.active_nodes().await,
+                });
+                ws.send(Message::text(frame.to_string()))
+                    .await
+                    .map_err(|error| error.to_string())?;
+            },
             update = updates.recv() => match update {
                 Ok(envelope) => {
                     let mut payload = serde_json::to_value(&envelope).unwrap();

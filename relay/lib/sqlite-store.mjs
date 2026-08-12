@@ -141,6 +141,16 @@ export class SqliteStore {
   }
 
   /**
+   * Оновлює `last_seen` пристрою (підключення до relay).
+   * @param {string} deviceId пристрій
+   * @param {string} [at] мітка часу ISO8601; дефолт — зараз
+   * @returns {Promise<void>} завершення запису
+   */
+  async touchDevice(deviceId, at = now()) {
+    this.db.query('UPDATE devices SET last_seen = ? WHERE device_id = ?').run(at, deviceId)
+  }
+
+  /**
    * Записує registration token транспорту push для пристрою.
    * @param {string} deviceId пристрій
    * @param {string} pushToken токен транспорту (порожній — зняти)

@@ -110,6 +110,17 @@ export class InMemoryStore {
   }
 
   /**
+   * Оновлює `last_seen` пристрою (підключення до relay).
+   * @param {string} deviceId пристрій
+   * @param {string} [at] мітка часу ISO8601; дефолт — зараз
+   * @returns {Promise<void>} завершення запису
+   */
+  async touchDevice(deviceId, at = new Date().toISOString()) {
+    const device = this.devices.get(deviceId)
+    if (device) device.last_seen = at
+  }
+
+  /**
    * Записує registration token транспорту push для пристрою.
    * @param {string} deviceId пристрій
    * @param {string} pushToken токен транспорту (порожній — зняти)

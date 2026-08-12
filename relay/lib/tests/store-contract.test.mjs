@@ -94,6 +94,23 @@ function storeContract(label, makeStore) {
       expect(await store.pushTokensFor(one.account_id)).toEqual([])
     })
 
+    test('touchDevice переживає перечитування пристрою', async () => {
+      // Розходження, знайдене на presence: `last_seen` писався присвоєнням
+      // у обʼєкт, повернутий з `deviceByToken`. В in-memory це той самий
+      // запис, у SQLite — відірваний рядок, тож запис губився мовчки.
+      const store = await makeStore()
+      const account = await store.createAccount({ email: `t-${Date.now()}@x` })
+      const { device_id, device_token } = await store.registerDevice(account.account_id, {
+        name: 'mac',
+        role: 'host',
+        pubkey: key('touch')
+      })
+      expect((await store.deviceByToken(device_token)).last_seen).toBeFalsy()
+
+      await store.touchDevice(device_id, '2026-08-12T10:00:00Z')
+      expect((await store.deviceByToken(device_token)).last_seen).toBe('2026-08-12T10:00:00Z')
+    })
+
     test('createTask робить власника owner автоматично', async () => {
       const store = await makeStore()
       const owner = await store.createAccount({ email: `o-${Date.now()}@x` })

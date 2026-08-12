@@ -55,6 +55,21 @@ async fn next_frame(rx: &mut mpsc::Receiver<Value>) -> Value {
         .expect("канал закрито")
 }
 
+/// Наступний кадр заданого виду.
+///
+/// Позиційне читання тут не годиться: міст шле не лише те, що перевіряє
+/// конкретний тест (presence-heartbeat, запит pubkey-ів), і будь-яке
+/// доповнення протоколу ламало б тести, які до нього не мають стосунку.
+async fn next_frame_of(rx: &mut mpsc::Receiver<Value>, kind: &str) -> Value {
+    for _ in 0..20 {
+        let frame = next_frame(rx).await;
+        if frame.get("kind").and_then(Value::as_str) == Some(kind) {
+            return frame;
+        }
+    }
+    panic!("кадр {kind} не прийшов")
+}
+
 fn remote_user_message(text: &str) -> Value {
     json!({
         "kind": "envelope",
@@ -88,32 +103,28 @@ async fn remote_user_message_runs_turn_and_streams_back() {
     );
 
     // Хендшейк моста: hello з device_token → subscribe кімнати.
-    let hello = next_frame(&mut received).await;
-    assert_eq!(hello["kind"], "hello");
+    let hello = next_frame_of(&mut received, "hello").await;
     assert_eq!(hello["device_token"], "host-token");
-    let subscribe = next_frame(&mut received).await;
-    assert_eq!(subscribe["kind"], "subscribe");
+    let subscribe = next_frame_of(&mut received, "subscribe").await;
     assert_eq!(subscribe["root"], "demo");
-    let pubkeys_request = next_frame(&mut received).await;
-    assert_eq!(pubkeys_request["kind"], "pubkeys");
+    next_frame_of(&mut received, "pubkeys").await;
 
     // Віддалений клієнт шле UserMessage через relay.
     outgoing.send(remote_user_message("привіт")).await.unwrap();
 
     // Міст ретранслює host-стрічку: echo UserMessage (seq призначив хост),
     // дельта відповіді агента, AgentTextDone.
-    let user_echo = next_frame(&mut received).await;
-    assert_eq!(user_echo["kind"], "envelope");
+    let user_echo = next_frame_of(&mut received, "envelope").await;
     assert_eq!(user_echo["envelope"]["event"]["type"], "UserMessage");
     assert_eq!(user_echo["envelope"]["seq"], 0);
     assert_eq!(
         user_echo["envelope"]["device_id"], "00000000-0000-0000-0000-00000000000a",
         "device_id віддаленого пристрою збережено"
     );
-    let delta = next_frame(&mut received).await;
+    let delta = next_frame_of(&mut received, "envelope").await;
     assert_eq!(delta["envelope"]["event"]["type"], "AgentTextDelta");
     assert_eq!(delta["envelope"]["event"]["text"], "echo: привіт");
-    let done = next_frame(&mut received).await;
+    let done = next_frame_of(&mut received, "envelope").await;
     assert_eq!(done["envelope"]["event"]["type"], "AgentTextDone");
 
     // Анти-цикл: relay повертає host-ехо (from_host: true) — міст ігнорує;
@@ -175,10 +186,7 @@ async fn signed_approval_flow_via_relay() {
             root: "demo".into(),
         },
     );
-    // hello / subscribe / pubkeys-запит.
-    for _ in 0..3 {
-        next_frame(&mut received).await;
-    }
+    next_frame_of(&mut received, "pubkeys").await;
 
     // Relay віддає pubkey телефона-approver-а (hex Ed25519).
     let phone_key = agent_protocol::SigningKey::from_bytes(&[5u8; 32]);
@@ -203,7 +211,7 @@ async fn signed_approval_flow_via_relay() {
     let verdict = state
         .request_approval("demo", "git push origin main".into(), Some("+1 -1".into()))
         .unwrap();
-    let request_frame = next_frame(&mut received).await;
+    let request_frame = next_frame_of(&mut received, "envelope").await;
     assert_eq!(
         request_frame["envelope"]["event"]["type"],
         "ApprovalRequest"
@@ -238,7 +246,7 @@ async fn signed_approval_flow_via_relay() {
         ))
         .await
         .unwrap();
-    let error_frame = next_frame(&mut received).await;
+    let error_frame = next_frame_of(&mut received, "envelope").await;
     assert_eq!(error_frame["envelope"]["event"]["type"], "Error");
 
     // Валідний підпис завершує запит.
@@ -254,10 +262,46 @@ async fn signed_approval_flow_via_relay() {
         ))
         .await
         .unwrap();
-    let echoed = next_frame(&mut received).await;
+    let echoed = next_frame_of(&mut received, "envelope").await;
     assert_eq!(
         echoed["envelope"]["event"]["type"], "ApprovalResponse",
         "верифікований вердикт журналюється в сесію"
     );
     assert_eq!(verdict.await, Ok(true));
+}
+
+/// Presence: міст сам оголошує себе в кімнаті (access.md — «хости:
+/// hostname, проєкти, активні вузли»), інакше реєстр relay лишався б
+/// порожнім API, який ніхто не викликає.
+#[tokio::test(flavor = "multi_thread")]
+async fn bridge_announces_presence_on_connect() {
+    let state_dir = tempfile::tempdir().unwrap();
+    let state = Arc::new(AppState::new(
+        SessionHost::new(state_dir.path().to_path_buf()).unwrap(),
+        Arc::new(EchoTurnRunner),
+        None,
+    ));
+    let (url, mut received, _outgoing) = mock_relay().await;
+    let _bridge = spawn_relay_bridge(
+        Arc::clone(&state),
+        RelayBridgeConfig {
+            url,
+            device_token: "тест".into(),
+            root: "mt/demo".into(),
+        },
+    );
+
+    let presence = next_frame_of(&mut received, "presence").await;
+    assert_eq!(
+        presence.get("root").and_then(Value::as_str),
+        Some("mt/demo")
+    );
+    // Активних run-ів ще немає — перелік порожній, але поле присутнє.
+    assert_eq!(
+        presence
+            .get("nodes")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
 }

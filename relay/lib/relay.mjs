@@ -6,6 +6,7 @@
  * сесій, НЕ проксіює git, НЕ видає lease (істина — git claim), НЕ виконує
  * агентів. Транспортний шар (WS) — server.mjs; тут — чиста логіка.
  */
+import { Presence } from './presence.mjs'
 import { Rooms } from './rooms.mjs'
 import { transferMessage, verifySignature } from './signing.mjs'
 import { roleAtLeast } from './store.mjs'
@@ -13,13 +14,14 @@ import { roleAtLeast } from './store.mjs'
 /** Ядро relay поверх store + rooms (+ опційний push-маршрутизатор). */
 export class RelayCore {
   /**
-   * @param {{ store: import('./store.mjs').InMemoryStore, rooms?: Rooms, push?: import('./push.mjs').PushRouter, auth?: object }} deps залежності
+   * @param {{ store: import('./store.mjs').InMemoryStore, rooms?: Rooms, push?: import('./push.mjs').PushRouter, auth?: object, presence?: Presence }} deps залежності
    */
-  constructor({ store, rooms = new Rooms(), push = null, auth = null }) {
+  constructor({ store, rooms = new Rooms(), push = null, auth = null, presence = new Presence() }) {
     this.store = store
     this.rooms = rooms
     this.push = push
     this.auth = auth
+    this.presence = presence
   }
 
   /**
@@ -78,7 +80,12 @@ export class RelayCore {
   async connectDevice(deviceToken) {
     const device = await this.store.deviceByToken(deviceToken)
     if (!device) throw new Error('invalid device token')
-    device.last_seen = new Date().toISOString()
+    // Саме через store, а не присвоєнням у повернутий обʼєкт: у SQLite це
+    // відірваний від бази рядок, тож присвоєння губилось мовчки — запис
+    // виживав лише в in-memory реалізації.
+    const at = new Date().toISOString()
+    await this.store.touchDevice(device.device_id, at)
+    device.last_seen = at
     return device
   }
 
@@ -97,6 +104,68 @@ export class RelayCore {
     // accountId у підписці — не декор: push типу 1 будить лише офлайнових,
     // а «офлайн» визначається саме наявністю живої підписки акаунта.
     return this.rooms.subscribe(root, { deviceId: device.device_id, accountId: device.account_id, send })
+  }
+
+  /**
+   * Оголошує присутність пристрою в кімнаті (access.md: «presence (хости:
+   * hostname, проєкти, активні вузли)») і транслює зміну учасникам.
+   *
+   * Presence не є правом на запис: «хто пише» лишається за git claim
+   * (overview.md, принцип 1). Тому гейт тут той самий, що й на підписку —
+   * членство, — і нічого більше; viewer теж присутній, бо «хто дивиться»
+   * так само корисно бачити.
+   * @param {object} device запис пристрою
+   * @param {string} root кореневий вузол задачі
+   * @param {{ hostname?: string, projects?: string[], nodes?: string[] }} info що оголошує пристрій
+   * @returns {Promise<object>} запис присутності
+   * @throws {Error} не учасник
+   */
+  async announcePresence(device, root, info = {}) {
+    const role = await this.store.memberRole(root, device.account_id)
+    if (!role) throw new Error(`presence відхилено: акаунт не учасник задачі ${root}`)
+    const record = this.presence.announce(root, {
+      deviceId: device.device_id,
+      accountId: device.account_id,
+      role: device.role,
+      hostname: info.hostname,
+      projects: info.projects,
+      nodes: info.nodes
+    })
+    this.rooms.publish(root, {
+      kind: 'event',
+      event: { type: 'PresenceChanged', ...record }
+    })
+    return record
+  }
+
+  /**
+   * Знімає присутність пристрою (закриття сокета/відписка) і транслює це.
+   * Тихо нічого не робить, якщо пристрій не був присутній — закриття
+   * сокета приходить і для тих, хто нічого не оголошував.
+   * @param {object} device запис пристрою
+   * @param {string} root кореневий вузол задачі
+   * @returns {void}
+   */
+  dropPresence(device, root) {
+    if (!this.presence.forget(root, device.device_id)) return
+    this.rooms.publish(root, {
+      kind: 'event',
+      event: { type: 'PresenceChanged', device_id: device.device_id, account_id: device.account_id, gone: true }
+    })
+  }
+
+  /**
+   * Присутні в кімнаті — лише учасникам (той самий гейт, що й на підписку).
+   * @param {object} device запис пристрою-запитувача
+   * @param {string} root кореневий вузол задачі
+   * @returns {Promise<object[]>} записи присутності
+   * @throws {Error} не учасник
+   */
+  async presenceOf(device, root) {
+    if (!(await this.store.memberRole(root, device.account_id))) {
+      throw new Error('presence відхилено: акаунт не учасник задачі')
+    }
+    return this.presence.of(root)
   }
 
   /**
