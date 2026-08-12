@@ -511,6 +511,7 @@ pub(crate) async fn handle_client_frame(
         Event::ApprovalResponse {
             request_id,
             approved,
+            chosen_option,
             signature,
         } => {
             match state
@@ -531,6 +532,7 @@ pub(crate) async fn handle_client_frame(
                         Event::ApprovalResponse {
                             request_id,
                             approved,
+                            chosen_option,
                             signature,
                         },
                         device_id,

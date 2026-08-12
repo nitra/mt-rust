@@ -75,6 +75,11 @@ pub enum Event {
     ApprovalResponse {
         request_id: String,
         approved: bool,
+        /// Обраний варіант розвилки (`decision-request` — mandates.md).
+        /// Присутнє лише для гейта розвилки; звичайний approve/deny його не
+        /// має, тому поле опційне, а не порожній рядок.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chosen_option: Option<String>,
         #[serde(with = "base64_bytes")]
         signature: Vec<u8>,
     },
@@ -256,6 +261,7 @@ mod tests {
             Event::ApprovalResponse {
                 request_id: "req-1".into(),
                 approved: true,
+                chosen_option: None,
                 signature: vec![0xAB; 64],
             },
             Event::CancelTurn {},
@@ -358,6 +364,7 @@ mod tests {
         let event = Event::ApprovalResponse {
             request_id: "req-1".into(),
             approved: false,
+            chosen_option: None,
             signature: vec![1, 2, 3],
         };
         let json = serde_json::to_value(&event).unwrap();

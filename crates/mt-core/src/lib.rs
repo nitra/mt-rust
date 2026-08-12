@@ -17,6 +17,9 @@ pub mod audit;
 pub mod claims;
 /// Конфігурація `.mt.json`: дефолти + merge рівнів у ефективний конфіг вузла.
 pub mod config;
+
+/// Розвилки: `decision-request`, стан `awaiting-decision`, відповідь власника.
+pub mod decision;
 /// Мапінг handle → PII з git-ignored `.mt/directory.json` (у git-файлах лишаються лише handles).
 pub mod directory;
 /// Парсинг і байт-точна серіалізація YAML-frontmatter task-файлів.
@@ -62,6 +65,9 @@ pub enum TaskState {
     Running,      // running_<pid>_until_<ts> sentinel present
     Stalled,      // remote claim lease expired (needs claim refs — not derived by local scan)
     PendingAudit, // open audit cycle
+    /// Відкритий `decision-request` без відповіді власника мандата
+    /// (mandates.md). Блокує залежні так само, як `pending-audit`.
+    AwaitingDecision,
     Resolved,     // accepted fact exists
     Failed,       // failed_streak >= agent_retry_max
     Unresolvable, // unresolvable.md exists (terminal)
@@ -615,7 +621,7 @@ fn composite_plan_state(dir: &Path, children: &[TaskNode]) -> Option<TaskState> 
 }
 
 // Priority per spec / JS deriveNodeState:
-// pending-audit > resolved > unresolvable > running > plan-review > spawned >
+// pending-audit > resolved > awaiting-decision > unresolvable > running > plan-review > spawned >
 // waiting/failed > pending > unassigned. (stalled needs remote — skipped in local scan.)
 fn detect_state(
     dir: &Path,
@@ -630,7 +636,14 @@ fn detect_state(
         FactState::Resolved => return TaskState::Resolved,
         FactState::None => {}
     }
-    // 3. unresolvable — terminal marker file.
+    // 3. awaiting-decision — відкрита розвилка. Стоїть ПЕРЕД
+    // `unresolvable`, бо це не той самий фінал: `unresolvable` термінальний
+    // (баг, який система не подужала), а розвилка чекає на людину і
+    // розблокується її відповіддю.
+    if crate::decision::open_decision(dir).is_some() {
+        return TaskState::AwaitingDecision;
+    }
+    // 4. unresolvable — terminal marker file.
     if dir.join("unresolvable.md").exists() {
         return TaskState::Unresolvable;
     }
@@ -1059,6 +1072,7 @@ pub fn scan_tasks_with_claims(
     Ok(nodes)
 }
 
+/// Сканує `tasks_dir` і будує локальний [`TaskNode`]-граф задач із вкладеними дітьми та виведеними станами.
 pub fn scan_tasks(tasks_dir: String, worktrees: Vec<String>) -> Result<Vec<TaskNode>, String> {
     let dir = PathBuf::from(&tasks_dir);
     if !dir.exists() {
@@ -1612,6 +1626,71 @@ mod tests {
     fn root_level_node_is_never_orphan() {
         let files = [("task.md", "---\nschema_version: 1\n---\n\n## Task\n\nx\n")];
         assert!(warnings_of("solo", &files).is_empty());
+    }
+
+    // ── awaiting-decision ──
+    #[test]
+    fn awaiting_decision_when_marker_open() {
+        // Вичерпана драбина + розвилка: вузол чекає на людину, а не
+        // «зламався». Саме це відрізняє розвилку від `unresolvable`.
+        let files = [
+            ("task.md", ""),
+            ("a.md", ""),
+            ("run_001.md", ""),
+            ("run_002.md", ""),
+            ("run_003.md", ""),
+            (
+                "awaiting-decision_0001.md",
+                "---\nschema_version: 1\ntype: awaiting-decision\n---\n",
+            ),
+        ];
+        assert_eq!(
+            state_of("task", &files, &[], None),
+            TaskState::AwaitingDecision
+        );
+    }
+
+    #[test]
+    fn awaiting_decision_wins_over_unresolvable() {
+        // Обидва маркери разом означають «драбину вичерпано і розвилку
+        // спаковано» — вузол чекає на відповідь, а не термінально мертвий.
+        let files = [
+            ("task.md", ""),
+            ("a.md", ""),
+            ("unresolvable.md", ""),
+            ("awaiting-decision_0001.md", ""),
+        ];
+        assert_eq!(
+            state_of("task", &files, &[], None),
+            TaskState::AwaitingDecision
+        );
+    }
+
+    #[test]
+    fn answered_decision_releases_state() {
+        let files = [
+            ("task.md", ""),
+            ("a.md", ""),
+            ("awaiting-decision_0001.md", ""),
+            (
+                "decided_0001.md",
+                "---\nschema_version: 1\nchosen_option: B\n---\n",
+            ),
+        ];
+        assert_eq!(state_of("task", &files, &[], None), TaskState::Waiting);
+    }
+
+    #[test]
+    fn accepted_fact_still_wins_over_open_decision() {
+        // Пріоритет зі спеки: прийнятий результат старший за розвилку —
+        // інакше закритий вузол «воскресав» би через забутий маркер.
+        let files = [
+            ("task.md", ""),
+            ("a.md", ""),
+            ("fact_001.md", ""),
+            ("awaiting-decision_0001.md", ""),
+        ];
+        assert_eq!(state_of("task", &files, &[], None), TaskState::Resolved);
     }
 
     // ── failed ──

@@ -22,7 +22,7 @@
 | M3 — dashboard і поверхні | не починався | surface-профілі, MCP-сервери, preview/`ContextSelected`, `client_kind: mt-dashboard` |
 | M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |
 | M5 — мета-цикл retro | не починався | увесь рушій; дані для нього вже накопичуються |
-| M6 — мандати й Дельта | не починався | уся глава; під нею вже лежить retry ladder |
+| M6 — мандати й Дельта | фаза 0 закрита | escalation-intake, маршрутизація за важелем, прецеденти, селектор, профілі, watcher |
 
 ## Ядро графа (`mt-core`)
 
@@ -101,7 +101,9 @@
 | i18n: конфіг, `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови | ВІДСУТНЄ | У `crates/` i18n немає. `layers/` покриває суміжну задачу (derived-переклади доків) іншим контейнером (`x.<lang>.md` у робочому дереві), іншим конфігом (`layers.json`) і однонапрямним потоком; contract-awareness там — інструкція моделі, не парсер із fail-closed |
 | i18n: `lang` у ClientHello | РЕАЛІЗОВАНО | `agent-protocol/handshake.rs`; далі хендшейку `lang` не використовується |
 | retro: рушій, пропозиції, innovation, impact | ВІДСУТНЄ | Дані накопичуються (`ledger.rs`, run-історія dogfood-графа), читача немає |
-| Мандати: карта, `decision-request`, `leverage_facets`, `chosen_option`, `awaiting-decision`, маршрутизатор, квіз-гейт, прецеденти, селектор, профілі, watcher, ШІ-мандати | ВІДСУТНЄ | Уся глава `mandates.md`. Половина інваріанта retry-before-escalate уже є: драбина реалізована (`runner.rs`), бракує виходу «розвилка → `decision-request`» |
+| Мандати: карта, валідація змін, квіз-гейт, ШІ-мандати | РЕАЛІЗОВАНО | `crates/mt-mandates`: `parse_mandates`, `effective_owner`, `validate_mandate_change` (generation fencing, подвійний підпис `escalates_to`, «остання константа»), `validate_approval` |
+| Мандати: `decision-request`, `awaiting-decision`, `chosen_option` | РЕАЛІЗОВАНО | `mt-core/decision.rs` (артефакт у `decisions/`, маркер стану у вузлі, відповідь), стан — `lib.rs` `detect_state`; CLI — `mt escalate`/`mt decide`; `chosen_option` — `agent-protocol` |
+| Мандати: решта глави | ВІДСУТНЄ | — |
 | Подія `Escalation` | РЕАЛІЗОВАНО (інша річ) | Записка «вгору» за handle з owner-app spec, не mandates-розвилка: без карти, фасетів, варіантів і підписаного рішення |
 
 ## Хвилі робіт
@@ -112,10 +114,12 @@
 2. **Замкнути M0 як автономний цикл — ✅ закрито.** `unresolvable` з трьома тригерами, контекст агента, `run-summary.md`, git-протокол `spawn`/`invalidate`/`kill` з re-run семантикою і `mt stop`, аудит-цикл разом із агентом-аудитором, Stage 1, EngineerAgent. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах. Хвости, що належать orchestrator-ролі хвилі 3: алерт при `unresolvable` і тригери аудиту за розкладом (`audit_schedule_days`/`audit_on_patch`).
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
 4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт ✅, `HandoffRequest` через relay ✅, presence ✅.
-5. **M6 фаза 0 — модельний трек Дельти.** Паралельно від хвилі 2, як велить roadmap: `mandates.yaml` (включно з `kind: model` і `audacity`), `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision`, квіз-гейт, конверсія вичерпаної драбини в розвилку. Соціальних ризиків нема — механіка обкатується на моделях.
+5. **M6 фаза 0 — ✅ закрито.** `mandates.yaml` (включно з `kind: model` і `audacity`), валідація змін, квіз-гейт — `crates/mt-mandates`; `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision` і вихід «вичерпана драбина → розвилка» — `mt-core/decision.rs` + `mt escalate`/`mt decide`. Лишається агент escalation-intake: механіка розвилки є, судження «це вибір, а не баг» поки робить людина, що викликає `mt escalate`.
 6. **M3 / M5 / M4.** Dashboard і поверхні; retro (MVP не чекає M1–M4 — дані вже є); файловий шар i18n.
 
 ## Закриті питання
+
+- **Маркер `awaiting-decision` у теці вузла** (2026-08-12): спека кладе `decision-request` у run branch (`refs/mt/runs/{run-id}/decisions/`), і це не змінено. Але derived-стан рахує `scan_tasks` по **робочому дереву**, куди run branch не розгорнутий — тобто зі спеки як є стан `awaiting-decision` був би невидимий для `mt status`. Рішення: артефакт лишається там, де велить спека, а в теці вузла лежить маркер-**вказівник** `awaiting-decision_NNNN.md` (і `decided_NNNN.md` на закриття). Це той самий патерн, що вже діє для `pending-audit_NNN.md`, чий стан теж матеріалізований маркером, а зміст живе окремо. Дублювання вмісту свідомо немає — два джерела істини розійшлися б.
 
 - **Сховище relay: SQLite замість PostgreSQL** (2026-08-11): рішення Vitalii. `stack.md` фіксує «Bun + PostgreSQL», але обсяг персистентних даних relay — акаунти й membership, тобто одиниці мегабайтів; SQLite дає персистентність без інфраструктури і, що важливіше, **перевіряється в тестах на кожній машині**, а не лише там, де піднято БД (PG-варіант лишався б прогнаним лише за наявності `RELAY_DATABASE_URL`). Контракт store параметризований, тож перехід на PostgreSQL — заміна однієї реалізації, не переписування relay. **Розбіжність зі спекою закрито** ([nitra/mt#69](https://github.com/nitra/mt/pull/69)): `stack.md` більше не називає один продукт БД — там тепер інтерфейс store і три дозволені реалізації (in-memory, SQLite, PostgreSQL), а нормативною умовою є проходження спільного контрактного набору.
 
