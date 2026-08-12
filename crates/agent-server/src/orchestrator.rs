@@ -12,7 +12,7 @@
 //! (запуск готових вузлів), **алерти** (вузли, що стали `unresolvable`) і
 //! **GC** (прибирання відпрацьованих worktree).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -31,6 +31,9 @@ pub struct TickReport {
     pub audited: Vec<String>,
     /// Прибрані worktree.
     pub pruned: Vec<String>,
+    /// Вузли, чий derived-стан змінився з попереднього прокидання —
+    /// джерело `NodeState` для `mt-dashboard` (runtime.md).
+    pub state_changes: Vec<(String, String)>,
     /// Помилки, які не мають валити цикл (наступний wake спробує знову).
     pub errors: Vec<String>,
 }
@@ -129,6 +132,10 @@ pub struct Orchestrator {
     /// Вузли, за які алерт уже відправлено — щоб кожне прокидання не
     /// повторювало той самий алерт про той самий термінальний вузол.
     alerted: HashSet<String>,
+    /// Derived-стани з попереднього прокидання. Дашборду потрібні **зміни**,
+    /// а не знімок: інакше кожен tick слав би стан усього графа, і стрічка
+    /// перетворилась би на періодичний дамп.
+    states: HashMap<String, mt_core::TaskState>,
 }
 
 impl Orchestrator {
@@ -143,6 +150,7 @@ impl Orchestrator {
             project_root,
             concurrency: concurrency.max(1),
             alerted: HashSet::new(),
+            states: HashMap::new(),
         }
     }
 
@@ -160,6 +168,35 @@ impl Orchestrator {
             {
                 self.alerted.insert(node.path.clone());
                 out.push(node.path.clone());
+            }
+            stack.extend(node.children.iter());
+        }
+        out.sort();
+        out
+    }
+
+    /// Вузли, чий стан змінився з попереднього прокидання.
+    ///
+    /// Перше прокидання після старту віддає **весь** граф: для дашборда,
+    /// що підключився до щойно піднятого хоста, «нічого не змінилось» і
+    /// «нічого немає» — різні речі, і початковий знімок їх розрізняє.
+    fn state_changes(&mut self, nodes: &[mt_core::TaskNode]) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let mut stack: Vec<&mt_core::TaskNode> = nodes.iter().collect();
+        while let Some(node) = stack.pop() {
+            let changed = self
+                .states
+                .get(&node.path)
+                .is_none_or(|previous| *previous != node.state);
+            if changed {
+                self.states.insert(node.path.clone(), node.state.clone());
+                out.push((
+                    node.path.clone(),
+                    serde_json::to_value(&node.state)
+                        .ok()
+                        .and_then(|value| value.as_str().map(str::to_string))
+                        .unwrap_or_default(),
+                ));
             }
             stack.extend(node.children.iter());
         }
@@ -191,6 +228,7 @@ impl Orchestrator {
         match mt_core::scan_tasks_with_claims(self.tasks_dir.clone(), Vec::new()) {
             Ok(nodes) => {
                 report.alerts = self.pending_alerts(&nodes);
+                report.state_changes = self.state_changes(&nodes);
                 let queue = audit_queue(&nodes);
                 for path in queue {
                     match mt_core::audit::run_auditor(
@@ -242,6 +280,55 @@ mod tests {
             is_composite: false,
             warnings: Vec::new(),
         }
+    }
+
+    #[test]
+    fn first_tick_reports_whole_graph_then_only_changes() {
+        // Для дашборда, що підключився до щойно піднятого хоста,
+        // «нічого не змінилось» і «нічого немає» — різні речі.
+        let mut orch = Orchestrator::new("mt", 1);
+        let nodes = vec![
+            node("alpha", mt_core::TaskState::Waiting),
+            node("beta", mt_core::TaskState::Resolved),
+        ];
+        assert_eq!(
+            orch.state_changes(&nodes),
+            [
+                ("alpha".to_string(), "waiting".to_string()),
+                ("beta".to_string(), "resolved".to_string())
+            ]
+        );
+        // Незмінний граф не шле нічого — інакше стрічка стала б
+        // періодичним дампом стану.
+        assert!(orch.state_changes(&nodes).is_empty());
+    }
+
+    #[test]
+    fn state_change_is_reported_once() {
+        let mut orch = Orchestrator::new("mt", 1);
+        orch.state_changes(&[node("alpha", mt_core::TaskState::Waiting)]);
+
+        let moved = vec![node("alpha", mt_core::TaskState::Running)];
+        assert_eq!(
+            orch.state_changes(&moved),
+            [("alpha".to_string(), "running".to_string())]
+        );
+        assert!(orch.state_changes(&moved).is_empty());
+    }
+
+    #[test]
+    fn state_changes_reach_nested_nodes() {
+        let mut orch = Orchestrator::new("mt", 1);
+        let mut parent = node("parent", mt_core::TaskState::Spawned);
+        parent
+            .children
+            .push(node("parent/child", mt_core::TaskState::Waiting));
+        let paths: Vec<String> = orch
+            .state_changes(&[parent])
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect();
+        assert_eq!(paths, ["parent", "parent/child"]);
     }
 
     #[test]

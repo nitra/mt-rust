@@ -12,12 +12,23 @@ pub type WsStream =
 
 /// Підключає WS-клієнта: шле ClientHello, чекає ServerHello, повертає стрім.
 /// `device_id` розрізняє клієнтів у сценаріях із кількома підключеннями.
+///
+/// Модуль спільний для кількох тестових бінарників, і кожен використовує
+/// свій підмножину хелперів — звідси `allow(dead_code)`.
+#[allow(dead_code)]
 pub async fn connect(url: &str, device_id: u128) -> WsStream {
+    connect_as(url, device_id, "cli").await
+}
+
+/// Те саме, але з явним `client_kind` — для `mt-dashboard`, який отримує
+/// інший зріз стрічки.
+#[allow(dead_code)]
+pub async fn connect_as(url: &str, device_id: u128, client_kind: &str) -> WsStream {
     let hello = ClientHello {
         protocol_version: PROTOCOL_VERSION,
         device_id: Uuid::from_u128(device_id),
         device_token: String::new(),
-        client_kind: "cli".into(),
+        client_kind: client_kind.into(),
         client_capabilities: vec![],
         lang: "uk".into(),
         want_replay_from: None,
