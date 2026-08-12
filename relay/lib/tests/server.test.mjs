@@ -5,6 +5,7 @@ import { once } from 'node:events'
 import { WebSocket } from 'ws'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 
+import { DevMagicAuth, KratosAuth } from '../auth.mjs'
 import { RelayCore } from '../relay.mjs'
 import { startRelayServer } from '../server.mjs'
 import { transferMessage } from '../signing.mjs'
@@ -23,6 +24,10 @@ const RE_HELLO = /hello/
 const RE_VIEWER = /viewer/
 const RE_HEX_KEY = /^[0-9a-f]{64}$/
 const RE_SIGNATURE = /підпис/
+const RE_MEMBER = /не учасник/
+const RE_SESSION = /сесія відхилена/
+const RE_HEX_KEY_MSG = /hex Ed25519/
+const RE_NO_ISSUE = /не видає сесій/
 // Тести ходять на локальний loopback без TLS; sdl-правило про insecure-URL
 // націлене на продакшн-адреси, тому схему складаємо окремо від хоста.
 const WS_SCHEME = 'ws:'
@@ -88,7 +93,7 @@ beforeAll(async () => {
       pubkey: fakeKey('tab')
     })
   ).device_token
-  server = await startRelayServer(new RelayCore({ store }))
+  server = await startRelayServer(new RelayCore({ store, auth: new DevMagicAuth({ store }) }))
 })
 
 afterAll(async () => {
@@ -230,4 +235,77 @@ test('viewer не шле клієнтські події через WS', async (
   expect(rejected.kind).toBe('error')
   expect(rejected.message).toMatch(RE_VIEWER)
   socket.close()
+})
+
+test('login → register_device → hello: повний шлях від email до кімнати', async () => {
+  // Ланка, якої не було: до цього device_token можна було здобути лише
+  // прямим викликом store, тобто мережевого шляху «людина → пристрій»
+  // не існувало взагалі.
+  const socket = await connect()
+  const session = await roundtrip(socket, { kind: 'login', email: 'newcomer@x' })
+  expect(session.kind).toBe('session')
+  expect(session.token).toBeTruthy()
+
+  const device = await roundtrip(socket, {
+    kind: 'register_device',
+    session_token: session.token,
+    name: 'phone',
+    role: 'client',
+    pubkey: fakeKey('phone')
+  })
+  expect(device.kind).toBe('device')
+
+  const hello = await roundtrip(socket, { kind: 'hello', device_token: device.device_token })
+  expect(hello.kind).toBe('ok')
+  expect(hello.device_id).toBe(device.device_id)
+
+  // Пристрій справжній, але membership лишається окремим гейтом.
+  const denied = await roundtrip(socket, { kind: 'subscribe', root: 'root-1' })
+  expect(denied.kind).toBe('error')
+  expect(denied.message).toMatch(RE_MEMBER)
+  socket.close()
+})
+
+test('register_device: чужа сесія і невалідний pubkey відхиляються', async () => {
+  const socket = await connect()
+  const badSession = await roundtrip(socket, {
+    kind: 'register_device',
+    session_token: 'вигаданий',
+    name: 'x',
+    role: 'client',
+    pubkey: fakeKey('x')
+  })
+  expect(badSession.kind).toBe('error')
+  expect(badSession.message).toMatch(RE_SESSION)
+
+  const session = await roundtrip(socket, { kind: 'login', email: 'badkey@x' })
+  const badKey = await roundtrip(socket, {
+    kind: 'register_device',
+    session_token: session.token,
+    name: 'x',
+    role: 'client',
+    pubkey: 'коротко'
+  })
+  expect(badKey.kind).toBe('error')
+  expect(badKey.message).toMatch(RE_HEX_KEY_MSG)
+  socket.close()
+})
+
+test('у продакшн-режимі кадр login відмовляє за побудовою', async () => {
+  // KratosAuth не має issueSession — шлях закритий відсутністю методу,
+  // а не прапорцем конфігурації, який можна забути виставити.
+  const prodStore = new InMemoryStore()
+  const prod = await startRelayServer(
+    new RelayCore({
+      store: prodStore,
+      auth: new KratosAuth({ store: prodStore, baseUrl: 'https://kratos.test', fetch: async () => ({ ok: false }) })
+    })
+  )
+  const socket = new WebSocket(`${WS_SCHEME}//127.0.0.1:${prod.port}`)
+  await once(socket, 'open')
+  const rejected = await roundtrip(socket, { kind: 'login', email: 'prod@x' })
+  expect(rejected.kind).toBe('error')
+  expect(rejected.message).toMatch(RE_NO_ISSUE)
+  socket.close()
+  await prod.close()
 })

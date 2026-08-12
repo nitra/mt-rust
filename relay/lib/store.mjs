@@ -60,6 +60,12 @@ export class InMemoryStore {
    * @returns {{account_id: string, email: string, display_name: string}} акаунт
    */
   async createAccount({ email, displayName = '' }) {
+    // Upsert за email: у схемі `email` UNIQUE, тож повторний логін мусить
+    // повертати наявний акаунт, а не плодити другий із тим самим email.
+    // Без цього `account_id` «пливе» між викликами auth, і учасник задачі
+    // після перелогіну стає іншою людиною.
+    const existing = await this.accountByEmail(email)
+    if (existing) return existing
     const account = { account_id: randomUUID(), email, display_name: displayName }
     this.accounts.set(account.account_id, account)
     return account

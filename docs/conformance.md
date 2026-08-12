@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | M0 — dogfood ядра | цикл замкнено | recurrence; secrets broker; телеметрія вартості |
 | M1 — agent-server | ✅ закрито | — |
-| M2 — mission control | частково | персистентний store і auth, реальний push-транспорт, handoff між машинами через relay, presence |
+| M2 — mission control | частково | реальний push-транспорт, handoff між машинами через relay, presence, зміна ролі/видалення учасника |
 | M3 — dashboard і поверхні | не починався | surface-профілі, MCP-сервери, preview/`ContextSelected`, `client_kind: mt-dashboard` |
 | M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |
 | M5 — мета-цикл retro | не починався | увесь рушій; дані для нього вже накопичуються |
@@ -81,8 +81,8 @@
 | --- | --- | --- | --- |
 | Ролі owner⊃host⊃approver⊃viewer | РЕАЛІЗОВАНО | `relay/lib/store.mjs`, `relay.mjs` | — |
 | Схема даних relay | РЕАЛІЗОВАНО | `relay/lib/store.mjs` (dev), `sqlite-store.mjs` + `schema.sql` (персистентна), вибір — `create-store.mjs`; контракт — `tests/store-contract.test.mjs` | — (стек фіксує PostgreSQL; обрано SQLite — див. «Закриті питання») |
-| Auth акаунтів (email + passkey) | ВІДСУТНЄ | — | Немає HTTP-поверхні, логіну, recovery |
-| Реєстрація пристрою | РЕАЛІЗОВАНО | `relay/lib/store.mjs` | — |
+| Auth акаунтів | ЧАСТКОВО | `relay/lib/auth.mjs` (`DevMagicAuth`, `KratosAuth`), вибір — `create-auth.mjs`; контракт — `tests/auth-contract.test.mjs` | Passkey/WebAuthn і recovery — у Kratos, свого flow relay не має; сумісність із живим Kratos не перевірена (stub-`fetch` доводить лише обробку форми `whoami`) |
+| Реєстрація пристрою | РЕАЛІЗОВАНО | `relay/lib/relay.mjs` `registerDevice` за сесією, кадр `register_device`; запис — `store.mjs` | — |
 | Ротація/revocation pubkey | ВІДСУТНЄ | — | Немає історії ключів і видалення пристрою |
 | Membership: invite/accept/decline | РЕАЛІЗОВАНО | `relay/lib/relay.mjs` | — |
 | Membership: зміна ролі / видалення | ВІДСУТНЄ | store-методи є, API немає | `MemberChanged {role: null}` ніколи не емітується |
@@ -111,7 +111,7 @@
 1. **Контрактний борг — ✅ закрито.** `failed_streak` (категорія + межа), формат `a.md`/`h.md`, видалення `mt-napi`, `schema_version` fail-closed, гейт immutability, дефолти `.mt.json`, `orphan-node`, матеріалізація `result: merge-conflict`.
 2. **Замкнути M0 як автономний цикл — ✅ закрито.** `unresolvable` з трьома тригерами, контекст агента, `run-summary.md`, git-протокол `spawn`/`invalidate`/`kill` з re-run семантикою і `mt stop`, аудит-цикл разом із агентом-аудитором, Stage 1, EngineerAgent. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах. Хвости, що належать orchestrator-ролі хвилі 3: алерт при `unresolvable` і тригери аудиту за розкладом (`audit_schedule_days`/`audit_on_patch`).
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
-4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store, auth, push-транспорт, `HandoffRequest` через relay, presence.
+4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт, `HandoffRequest` через relay, presence.
 5. **M6 фаза 0 — модельний трек Дельти.** Паралельно від хвилі 2, як велить roadmap: `mandates.yaml` (включно з `kind: model` і `audacity`), `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision`, квіз-гейт, конверсія вичерпаної драбини в розвилку. Соціальних ризиків нема — механіка обкатується на моделях.
 6. **M3 / M5 / M4.** Dashboard і поверхні; retro (MVP не чекає M1–M4 — дані вже є); файловий шар i18n.
 

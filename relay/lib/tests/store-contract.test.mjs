@@ -44,6 +44,18 @@ function storeContract(label, makeStore) {
       expect(await store.accountByEmail('nobody@x')).toBeNull()
     })
 
+    test('createAccount ідемпотентний за email', async () => {
+      // Дірка, яку відкрив auth-контракт: у схемі `email` UNIQUE, але
+      // in-memory реалізація плодила другий акаунт — і `account_id` «плив»
+      // між викликами `verifySession`, тобто учасник задачі після
+      // перелогіну ставав іншою людиною.
+      const store = await makeStore()
+      const email = `dup-${Date.now()}@x`
+      const first = await store.createAccount({ email, displayName: 'A' })
+      const second = await store.createAccount({ email, displayName: 'B' })
+      expect(second.account_id).toBe(first.account_id)
+    })
+
     test('пристрій: токен авторизує, невалідний pubkey відхиляється одразу', async () => {
       const store = await makeStore()
       const account = await store.createAccount({ email: `d-${Date.now()}@x` })

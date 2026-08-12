@@ -13,12 +13,46 @@ import { roleAtLeast } from './store.mjs'
 /** Ядро relay поверх store + rooms (+ опційний push-маршрутизатор). */
 export class RelayCore {
   /**
-   * @param {{ store: import('./store.mjs').InMemoryStore, rooms?: Rooms, push?: import('./push.mjs').PushRouter }} deps залежності
+   * @param {{ store: import('./store.mjs').InMemoryStore, rooms?: Rooms, push?: import('./push.mjs').PushRouter, auth?: object }} deps залежності
    */
-  constructor({ store, rooms = new Rooms(), push = null }) {
+  constructor({ store, rooms = new Rooms(), push = null, auth = null }) {
     this.store = store
     this.rooms = rooms
     this.push = push
+    this.auth = auth
+  }
+
+  /**
+   * Логін у dev-режимі: видає сесію на email без доставки листа.
+   *
+   * Доступний, лише якщо провайдер auth **уміє** видавати сесії — у
+   * продакшні (Kratos) методу немає, тож шлях закритий за побудовою, а не
+   * прапорцем конфігурації (auth.mjs).
+   * @param {string} email email користувача
+   * @returns {Promise<{token: string, account_id: string, expires_at: string}>} сесія
+   * @throws {Error} провайдер не видає сесій
+   */
+  async devLogin(email) {
+    if (typeof this.auth?.issueSession !== 'function') {
+      throw new Error('login відхилено: провайдер auth не видає сесій')
+    }
+    return await this.auth.issueSession(email)
+  }
+
+  /**
+   * Реєстрація пристрою за сесією користувача — ланка, якої бракувало між
+   * «людина залогінилась» і «пристрій у кімнаті»: сесія доводить, чий це
+   * акаунт, пристрій приносить свій Ed25519-pubkey і отримує `device_token`
+   * (access.md, «Акаунти, пристрої, ключі»).
+   * @param {string} sessionToken токен сесії
+   * @param {{ name: string, role: string, pubkey: string }} params дані пристрою
+   * @returns {Promise<{device_id: string, device_token: string}>} ідентифікатор і токен
+   * @throws {Error} auth не налаштований, сесія невалідна або pubkey не hex-32
+   */
+  async registerDevice(sessionToken, { name, role, pubkey }) {
+    if (!this.auth) throw new Error('реєстрація відхилена: auth-провайдер не налаштований')
+    const { account_id } = await this.auth.verifySession(sessionToken)
+    return await this.store.registerDevice(account_id, { name, role, pubkey })
   }
 
   /**
