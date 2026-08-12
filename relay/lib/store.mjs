@@ -102,10 +102,36 @@ export class InMemoryStore {
       pubkey,
       name,
       device_token: randomUUID(),
+      push_token: '',
       last_seen: null
     }
     this.devices.set(device.device_id, device)
     return { device_id: device.device_id, device_token: device.device_token }
+  }
+
+  /**
+   * Записує registration token транспорту push для пристрою.
+   * @param {string} deviceId пристрій
+   * @param {string} pushToken токен транспорту (порожній — зняти)
+   * @returns {Promise<void>} завершення запису
+   */
+  async setPushToken(deviceId, pushToken) {
+    const device = this.devices.get(deviceId)
+    if (device) device.push_token = String(pushToken ?? '')
+  }
+
+  /**
+   * Push-токени всіх пристроїв акаунта. Пристрої без токена (headless-хост,
+   * тест) не потрапляють у вибірку — доставляти нема куди.
+   * @param {string} accountId акаунт
+   * @returns {Promise<{device_id: string, push_token: string}[]>} токени
+   */
+  async pushTokensFor(accountId) {
+    return this.devices
+      .values()
+      .filter(device => device.account_id === accountId && device.push_token)
+      .map(({ device_id, push_token }) => ({ device_id, push_token }))
+      .toArray()
   }
 
   /**

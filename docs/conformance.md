@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | M0 — dogfood ядра | цикл замкнено | recurrence; secrets broker; телеметрія вартості |
 | M1 — agent-server | ✅ закрито | — |
-| M2 — mission control | частково | реальний push-транспорт, handoff між машинами через relay, presence, зміна ролі/видалення учасника |
+| M2 — mission control | частково | handoff між машинами через relay, presence, зміна ролі/видалення учасника |
 | M3 — dashboard і поверхні | не починався | surface-профілі, MCP-сервери, preview/`ContextSelected`, `client_kind: mt-dashboard` |
 | M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |
 | M5 — мета-цикл retro | не починався | увесь рушій; дані для нього вже накопичуються |
@@ -52,7 +52,7 @@
 | Аудит-цикл: вердикт, clarification, amend, `audit_failed_streak` | РЕАЛІЗОВАНО | `audit.rs`; CLI — `mt verdict`/`mt clarify`/`mt amend` | — |
 | Аудитор як актор + тригери аудиту | РЕАЛІЗОВАНО | `audit.rs` `run_auditor`; черга — `orchestrator.rs` `audit_queue`; `audit_on_patch` — `signal.rs` `audit_policy` | — |
 | EngineerAgent | РЕАЛІЗОВАНО | `runner.rs` `Actor`/`build_engineer_prompt`/`full_run_history`; CLI — `mt run --actor engineer` | — (GraphPatch реалізовано як дозволені втручання через штатні команди, окремого артефакту спека не задає) |
-| `unresolvable` (3 тригери + алерт) | РЕАЛІЗОВАНО | `lib.rs` `unresolvable_reason`/`write_unresolvable`; алерт — `agent-server/orchestrator.rs` `pending_alerts` | — (доставка алерту назовні — push-транспорт M2) |
+| `unresolvable` (3 тригери + алерт) | РЕАЛІЗОВАНО | `lib.rs` `unresolvable_reason`/`write_unresolvable`; алерт — `agent-server/orchestrator.rs` `pending_alerts`; доставка — push тип 3 (`relay/lib/push.mjs`) | — |
 | Recurrence | ВІДСУТНЄ | — | Уся глава `recurrence.md` |
 | Secrets broker / sandbox `skill_profiles` | ВІДСУТНЄ | — | `a.md.secrets` не інжектиться, allowlist немає |
 | `.mt.json` — дефолти для реалізованого | РЕАЛІЗОВАНО | `config.rs` `config_defaults` | — (ключі нереалізованих фіч свідомо без дефолтів, див. «Закриті питання») |
@@ -80,7 +80,7 @@
 | Підсистема | Вердикт | Де в коді | Чого бракує |
 | --- | --- | --- | --- |
 | Ролі owner⊃host⊃approver⊃viewer | РЕАЛІЗОВАНО | `relay/lib/store.mjs`, `relay.mjs` | — |
-| Схема даних relay | РЕАЛІЗОВАНО | `relay/lib/store.mjs` (dev), `sqlite-store.mjs` + `schema.sql` (персистентна), вибір — `create-store.mjs`; контракт — `tests/store-contract.test.mjs` | — (стек фіксує PostgreSQL; обрано SQLite — див. «Закриті питання») |
+| Схема даних relay | РЕАЛІЗОВАНО | `relay/lib/store.mjs` (dev), `sqlite-store.mjs` + `schema.sql` (персистентна), міграції колонок — `SqliteStore.migrate`, вибір — `create-store.mjs`; контракт — `tests/store-contract.test.mjs` | — |
 | Auth акаунтів | ЧАСТКОВО | `relay/lib/auth.mjs` (`DevMagicAuth`, `KratosAuth`), вибір — `create-auth.mjs`; контракт — `tests/auth-contract.test.mjs` | Passkey/WebAuthn і recovery — у Kratos, свого flow relay не має; сумісність із живим Kratos не перевірена (stub-`fetch` доводить лише обробку форми `whoami`) |
 | Реєстрація пристрою | РЕАЛІЗОВАНО | `relay/lib/relay.mjs` `registerDevice` за сесією, кадр `register_device`; запис — `store.mjs` | — |
 | Ротація/revocation pubkey | ВІДСУТНЄ | — | Немає історії ключів і видалення пристрою |
@@ -91,7 +91,7 @@
 | Presence | ВІДСУТНЄ | — | Лише `last_seen` |
 | Гейт 2 — plan-review з підписом | ЧАСТКОВО | `spawn.rs` | У фронтматері рішення немає блоку `approved_by` з підписом |
 | Гейт 3 — аудит-вердикт людини | ЧАСТКОВО | `signal.rs` | Немає блоку підпису в `audit-result_NNN.md` |
-| Push тип 2 / тип 3 | ЧАСТКОВО | `relay/lib/push.mjs` | Тип 1 відсутній; тип 3 не покриває `notify` для `h.md`-assignee; транспорт FCM/APNs — in-memory sink |
+| Push типів 1/2/3 | РЕАЛІЗОВАНО | маршрутизація — `relay/lib/push.mjs`; транспорт — `fcm-sink.mjs` (FCM HTTP v1) і `push-sink.mjs` (dev), вибір — `create-push.mjs`; контракт — `tests/push-sink-contract.test.mjs` | — (APNs окремо не робимо: FCM доставляє на iOS; доставка живим FCM не перевірена — stub-`fetch` доводить лише форму запитів) |
 | PII-directory | ЧАСТКОВО | `mt-core/directory.rs` | Мертвий код: парсер є, викликів немає → `Escalation.to_account_id` ніхто не заповнює |
 
 ## i18n, retro, мандати
@@ -111,7 +111,7 @@
 1. **Контрактний борг — ✅ закрито.** `failed_streak` (категорія + межа), формат `a.md`/`h.md`, видалення `mt-napi`, `schema_version` fail-closed, гейт immutability, дефолти `.mt.json`, `orphan-node`, матеріалізація `result: merge-conflict`.
 2. **Замкнути M0 як автономний цикл — ✅ закрито.** `unresolvable` з трьома тригерами, контекст агента, `run-summary.md`, git-протокол `spawn`/`invalidate`/`kill` з re-run семантикою і `mt stop`, аудит-цикл разом із агентом-аудитором, Stage 1, EngineerAgent. Це і є «перший продукт» зі стратегії: автономне досягнення мети з людиною на гейтах. Хвости, що належать orchestrator-ролі хвилі 3: алерт при `unresolvable` і тригери аудиту за розкладом (`audit_schedule_days`/`audit_on_patch`).
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
-4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт, `HandoffRequest` через relay, presence.
+4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт ✅, `HandoffRequest` через relay, presence.
 5. **M6 фаза 0 — модельний трек Дельти.** Паралельно від хвилі 2, як велить roadmap: `mandates.yaml` (включно з `kind: model` і `audacity`), `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision`, квіз-гейт, конверсія вичерпаної драбини в розвилку. Соціальних ризиків нема — механіка обкатується на моделях.
 6. **M3 / M5 / M4.** Dashboard і поверхні; retro (MVP не чекає M1–M4 — дані вже є); файловий шар i18n.
 

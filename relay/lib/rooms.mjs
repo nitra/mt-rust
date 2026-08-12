@@ -17,7 +17,7 @@ export class Rooms {
    */
   constructor(bufferLimit = BUFFER_LIMIT) {
     this.bufferLimit = bufferLimit
-    /** @type {Map<string, {buffer: object[], subscribers: Set<{deviceId: string, send: (frame: object) => void}>}>} */
+    /** @type {Map<string, {buffer: object[], subscribers: Set<{deviceId: string, accountId?: string, send: (frame: object) => void}>}>} */
     this.rooms = new Map()
   }
 
@@ -38,7 +38,7 @@ export class Rooms {
   /**
    * Підписує пристрій: спершу реплей буфера, далі — live-стрічка.
    * @param {string} root кореневий вузол задачі
-   * @param {{deviceId: string, send: (frame: object) => void}} subscriber підписник
+   * @param {{deviceId: string, accountId?: string, send: (frame: object) => void}} subscriber підписник (accountId — щоб push знав, хто зараз онлайн)
    * @returns {() => void} відписка
    */
   subscribe(root, subscriber) {
