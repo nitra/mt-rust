@@ -77,6 +77,19 @@ pub struct AttachArgs {
     pub lang: String,
 }
 
+/// Аргументи `mt handoff` — «перенести сюди» (operations.md).
+#[derive(Debug, clap::Args)]
+pub struct HandoffArgs {
+    /// Вузол (шлях у tasks-директорії).
+    pub node: String,
+    /// Директорія discovery/стану (дефолт — ~/.nitra).
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+    /// BCP-47 мова учасника (обовʼязкове поле v4).
+    #[arg(long, default_value = "uk")]
+    pub lang: String,
+}
+
 /// Синхронна обгортка: решта команд `mt` синхронні, тому рантайм
 /// створюється точково, а не робить увесь CLI async.
 fn block_on<F: std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>>(
@@ -109,6 +122,11 @@ pub fn run_serve_cmd(args: ServeArgs, _json: bool) -> Result<(), String> {
 /// Запускає команду `mt attach`.
 pub fn run_attach_cmd(args: AttachArgs, _json: bool) -> Result<(), String> {
     block_on(run_attach(state_dir(args.state_dir), args.node, args.lang))
+}
+
+/// Запускає команду `mt handoff`.
+pub fn run_handoff_cmd(args: HandoffArgs, _json: bool) -> Result<(), String> {
+    block_on(run_handoff(state_dir(args.state_dir), args.node, args.lang))
 }
 
 async fn run_serve(
@@ -214,6 +232,88 @@ async fn run_serve(
     }
     handle.abort();
     Ok(())
+}
+
+/// `mt handoff <node>` — просить ЛОКАЛЬНИЙ `mt serve` забрати вузол собі
+/// (`HandoffPull`); хост далі веде обмін `HandoffRequest`/`HandoffAck` через
+/// relay (runtime.md, «Міграція сесії між хостами»).
+///
+/// Команда одноразова: чекає на перший підсумковий кадр (`ClaimChanged` —
+/// перенесено, `Error` — не вийшло) і виходить.
+async fn run_handoff(
+    dir: PathBuf,
+    node: String,
+    lang: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (mut stream, _server_hello) = connect_host(dir, lang).await?;
+    let envelope = Envelope {
+        seq: 0,
+        ts: chrono::Utc::now(),
+        node_hash: node.clone(),
+        run_token: Uuid::nil(),
+        device_id: None,
+        account_id: None,
+        event: Event::HandoffPull {
+            node_hash: node.clone(),
+        },
+    };
+    stream
+        .send(Message::text(serde_json::to_string(&envelope)?))
+        .await?;
+    println!("handoff {node}: запит надіслано, чекаю на тримача…");
+
+    while let Some(Ok(Message::Text(text))) = stream.next().await {
+        let Ok(incoming) = serde_json::from_str::<Envelope>(text.as_str()) else {
+            continue;
+        };
+        if incoming.node_hash != node {
+            continue;
+        }
+        match incoming.event {
+            Event::ClaimChanged { generation, .. } => {
+                println!("handoff {node}: перенесено сюди (generation {generation})");
+                return Ok(());
+            }
+            Event::Error { message } => return Err(message.into()),
+            _ => {}
+        }
+    }
+    Err("сервер закрив зʼєднання до підсумку handoff".into())
+}
+
+/// WS до локального хоста (`tokio-tungstenite` поверх TCP).
+type HostStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// Хендшейк із локальним `mt serve` через discovery port-file.
+async fn connect_host(
+    dir: PathBuf,
+    lang: String,
+) -> Result<(HostStream, ServerHello), Box<dyn std::error::Error>> {
+    let (port_file, token) = Discovery::new(dir)
+        .read()
+        .map_err(|error| format!("discovery не знайдено ({error}); спершу запусти `mt serve`"))?;
+    let url = format!("ws://127.0.0.1:{}/ws", port_file.port);
+    let (mut stream, _) = tokio_tungstenite::connect_async(&url).await?;
+    let hello = ClientHello {
+        protocol_version: PROTOCOL_VERSION,
+        device_id: Uuid::new_v4(),
+        device_token: token,
+        client_kind: "cli".into(),
+        client_capabilities: vec!["approvals".into(), "diff_view".into()],
+        lang,
+        want_replay_from: None,
+    };
+    stream
+        .send(Message::text(serde_json::to_string(&hello)?))
+        .await?;
+    let Some(Ok(Message::Text(first))) = stream.next().await else {
+        return Err("сервер закрив зʼєднання на хендшейку".into());
+    };
+    if let Ok(Event::Error { message }) = serde_json::from_str::<Event>(first.as_str()) {
+        return Err(message.into());
+    }
+    Ok((stream, serde_json::from_str(first.as_str())?))
 }
 
 async fn run_attach(

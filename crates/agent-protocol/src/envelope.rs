@@ -85,6 +85,14 @@ pub enum Event {
     /// Пауза/відпустити: хост CAS-delete claim; журнал лишається в run ref
     /// базою відновлення (мінорне розширення v4).
     ReleaseSession {},
+    /// «Перенести сюди» з боку **локального** клієнта (`mt handoff <node>`):
+    /// візьми цей вузол собі. Окремий від [`Event::HandoffRequest`]
+    /// свідомо — той адресований ІНШОМУ хосту через relay («віддай»), цей
+    /// адресований своєму («забери»). Один варіант на обидва змісти
+    /// означав би, що зміст залежить від того, звідки кадр прийшов.
+    HandoffPull {
+        node_hash: String,
+    },
 
     // ── хост → клієнти ─────────────────────────────────────────────────────
     /// ЕФЕМЕРНА: не журналиться — журналиться `AgentTextDone`-агрегат.
@@ -127,6 +135,26 @@ pub enum Event {
         state: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         claim: Option<ClaimInfo>,
+    },
+    /// «Перенести сюди» — хост просить тримача claim віддати вузол
+    /// (runtime.md, «Міграція сесії між хостами», крок 1; access.md:
+    /// relay транслює `HandoffRequest`). Єдина пара подій **хост → хост**:
+    /// обидві сторони — тримачі git-доступу, тонкі клієнти їх ігнорують.
+    /// Не-тримач мовчить: спека задає на цей випадок не відмову, а власний
+    /// шлях MT — чекати lease expiry + grace і робити takeover (крок 4).
+    HandoffRequest {
+        node_hash: String,
+    },
+    /// Відповідь тримача (крок 2, «ack»): вузол відпущено, ось із чого
+    /// відновлюватись. `run_token` — **імʼя старого run ref**
+    /// (`refs/mt/runs/{hash}/{token}`), а не діючий credential: claim під
+    /// цей момент уже CAS-видалено, а сам ref і так лежить на спільному
+    /// remote. Тому розсилка тікета в кімнату нічого не розкриває понад
+    /// те, що вже має кожен учасник із git-доступом.
+    HandoffAck {
+        node_hash: String,
+        run_token: String,
+        generation: u64,
     },
     /// Транслюється relay-ем; джерело істини — git ref.
     ClaimChanged {
@@ -273,6 +301,14 @@ mod tests {
                         .with_timezone(&Utc),
                     generation: 3,
                 }),
+            },
+            Event::HandoffRequest {
+                node_hash: "c".repeat(20),
+            },
+            Event::HandoffAck {
+                node_hash: "c".repeat(20),
+                run_token: "9f1c".repeat(4),
+                generation: 4,
             },
             Event::ClaimChanged {
                 node_hash: "b".repeat(20),
