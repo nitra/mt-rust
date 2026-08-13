@@ -20,7 +20,7 @@
 | M1 — agent-server | ✅ закрито | — |
 | M2 — mission control | частково | зміна ролі/видалення учасника, ротація/revocation ключів, checkpoint-handoff, CLI `mt sessions` |
 | M3 — dashboard і поверхні | почався | MCP-сервери (чекають secrets-брокера), preview-модуль |
-| M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |
+| M4 — файловий шар i18n | ядро | сховище `refs/mt/i18n`, write path, черга регенерації, live-шар |
 | M5 — мета-цикл retro | MVP | LLM-крок, innovation/baseline, impact-зрізи, фоновий прогін |
 | M6 — мандати й Дельта | фаза 0 закрита | escalation-intake, маршрутизація за важелем, прецеденти, селектор, профілі, watcher |
 
@@ -100,7 +100,8 @@
 
 | Підсистема | Вердикт | Коментар |
 | --- | --- | --- |
-| i18n: конфіг, `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови | ВІДСУТНЄ | У `crates/` i18n немає. `layers/` покриває суміжну задачу (derived-переклади доків) іншим контейнером (`x.<lang>.md` у робочому дереві), іншим конфігом (`layers.json`) і однонапрямним потоком; contract-awareness там — інструкція моделі, не парсер із fail-closed |
+| i18n: контрактне ядро (base-мова, `source_hash`, «що перекладається», contract-aware сегментація) | РЕАЛІЗОВАНО | `mt-core/i18n.rs`: `I18nConfig`, `TranslationMeta`/`is_fresh`, `is_translatable` (триступенева схема), `segment` (fail-closed), `materialize` (read path, лише свіжі); неоднозначність спеки щодо `## Task`/`## Done when` вирішена явно — див. «Закриті питання» |
+| i18n: сховище `refs/mt/i18n`, write path, черга регенерації, live-шар | ВІДСУТНЄ | Ядро є (рядок вище); запис/читання i18n-ref разом із fenced publish; компіляція authored-правки в base; фонова черга agent-server; live-переклад Envelope за capability `self-translate`; `layers/` лишається суміжною задачею з іншим контейнером і конфігом |
 | i18n: `lang` у ClientHello | РЕАЛІЗОВАНО | `agent-protocol/handshake.rs`; далі хендшейку `lang` не використовується |
 | retro: датасет і детерміновані пропозиції | РЕАЛІЗОВАНО | `mt-core/retro.rs` (`collect_runs`, `analyze`, приватний звіт `~/.nitra/retro/<period>.md`); CLI — `mt retro`/`mt retro --show`; — (opt-in `retro.enabled`, дефолт `false` — контрактна вимога глави) |
 | retro: LLM-крок, innovation, impact | ВІДСУТНЄ | Детермінований датасет є (рядок вище); LLM-аналіз поверх датасету; `innovation_NNN.md` і baseline; impact-зрізи; фоновий прогін за `schedule_days`; агрегатор компетенцій як другий вихід |
@@ -118,9 +119,11 @@
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
 4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт ✅, `HandoffRequest` через relay ✅, presence ✅.
 5. **M6 фаза 0 — ✅ закрито.** `mandates.yaml` (включно з `kind: model` і `audacity`), валідація змін, квіз-гейт — `crates/mt-mandates`; `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision` і вихід «вичерпана драбина → розвилка» — `mt-core/decision.rs` + `mt escalate`/`mt decide`. Лишається агент escalation-intake: механіка розвилки є, судження «це вибір, а не баг» поки робить людина, що викликає `mt escalate`.
-6. **M3 / M5 / M4.** Dashboard і поверхні (`client_kind: mt-dashboard` ✅, surface-профілі + `ContextSelected` ✅; лишаються MCP-сервери — вони впираються в secrets-брокер — і preview-модуль); retro MVP ✅ (детермінований датасет і пропозиції; LLM-крок, innovation та impact — далі); файловий шар i18n.
+6. **M3 / M5 / M4.** Dashboard і поверхні (`client_kind: mt-dashboard` ✅, surface-профілі + `ContextSelected` ✅; лишаються MCP-сервери — вони впираються в secrets-брокер — і preview-модуль); retro MVP ✅ (детермінований датасет і пропозиції; LLM-крок, innovation та impact — далі); файловий шар i18n (контрактне ядро ✅; сховище в ref-і, write path і черга регенерації — далі).
 
 ## Закриті питання
+
+- **`## Task`/`## Done when` перекладаються, заголовки — ні** (2026-08-13): `i18n.md` перелічує ці дві секції серед «контрактних, які парсить скрипт», і поруч каже «перекладається лише людський текст між ними» — а це і є той людський текст. Читати список буквально означало б, що вузол не перекладається взагалі, тобто крос-мовність (ключовий вимір `vision.md`) не працює саме там, де потрібна. Рішення: **заголовки всіх секцій лишаються base завжди** — вони і є те, що парсить скрипт; тіла машинних секцій (`Check`, `Children`, `Inputs`, `Approvals`, `Ref`) — теж; тіла `Task`/`Done when` перекладаються. Fail-closed від цього не страждає: жоден рядок, який читає машина, перекладачу не видно. Прив'язано тестом до констант `MACHINE_SECTIONS`/`PROSE_SECTIONS`.
 
 - **Маркер `awaiting-decision` у теці вузла** (2026-08-12): спека кладе `decision-request` у run branch (`refs/mt/runs/{run-id}/decisions/`), і це не змінено. Але derived-стан рахує `scan_tasks` по **робочому дереву**, куди run branch не розгорнутий — тобто зі спеки як є стан `awaiting-decision` був би невидимий для `mt status`. Рішення: артефакт лишається там, де велить спека, а в теці вузла лежить маркер-**вказівник** `awaiting-decision_NNNN.md` (і `decided_NNNN.md` на закриття). Це той самий патерн, що вже діє для `pending-audit_NNN.md`, чий стан теж матеріалізований маркером, а зміст живе окремо. Дублювання вмісту свідомо немає — два джерела істини розійшлися б.
 
