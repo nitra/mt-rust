@@ -1084,6 +1084,29 @@ pub fn run_node_env_as(
         ("MT_CLAIM_GENERATION".into(), "1".into()),
     ];
 
+    // Secrets-брокер (operations.md): значення живуть у сховищі ОС і
+    // потрапляють виконавцю ЛИШЕ через ENV процесу — у файлах вузлів їх
+    // немає. Відсутній ключ не підставляється порожнім: це попередження в
+    // run-файлі, а не тихий провал десь глибше.
+    let secret_keys = crate::secrets::requested_keys(
+        &read_executor_flag(&live_dir)?.unwrap_or(serde_json::Value::Null),
+    );
+    let (secret_store, store_error) = crate::secrets::default_store(Path::new(
+        &std::env::var("HOME").unwrap_or_else(|_| ".".into()),
+    ));
+    let secrets = crate::secrets::resolve_keys(&secret_keys, secret_store.as_ref());
+    let masker = crate::secrets::Masker::new(&secrets.env);
+    let mut base_envs = base_envs;
+    base_envs.extend(secrets.env.iter().cloned());
+    let secret_warnings: Vec<String> = store_error
+        .map(|error| error.to_string())
+        .into_iter()
+        .chain(
+            (!secrets.missing.is_empty())
+                .then(|| format!("секретів немає у сховищі: {}", secrets.missing.join(", "))),
+        )
+        .collect();
+
     // Єдиний agent-шлях — підписочний CLI з каскадом по хмарних підписках
     // за rate-limit (node_executor видалено — PR #48).
     let mut used_agent_cli: Option<String> = None;
@@ -1256,7 +1279,10 @@ pub fn run_node_env_as(
         };
         let completed =
             md_section(&draft, "Completed").unwrap_or_else(|| "невідомо (draft відсутній)".into());
-        let blockers = md_section(&draft, "Blockers").unwrap_or(default_blockers);
+        let mut blockers = md_section(&draft, "Blockers").unwrap_or(default_blockers);
+        if !secret_warnings.is_empty() {
+            blockers.push_str(&format!("\n\nSecrets: {}", secret_warnings.join("; ")));
+        }
         let next = md_section(&draft, "Next Attempt")
             .unwrap_or_else(|| "діагностувати попередній ран".into());
         // Діагностика провалу не губиться: хвіст виводу виконавця (який уже
@@ -1264,7 +1290,10 @@ pub fn run_node_env_as(
         let output_tail = watched
             .as_ref()
             .map(|w| {
-                let tail: Vec<&str> = w.combined.trim().lines().rev().take(15).collect();
+                // Маскування ДО запису: інакше секрет опинився б у git —
+                // не з конфігу, а з логу виконавця.
+                let masked = masker.apply(&w.combined);
+                let tail: Vec<&str> = masked.trim().lines().rev().take(15).collect();
                 tail.into_iter().rev().collect::<Vec<_>>().join("\n")
             })
             .filter(|t| !t.is_empty())
@@ -2007,6 +2036,54 @@ mod tests {
             cascade_order("claude", &cloud),
             ["claude", "codex", "cursor"]
         );
+    }
+
+    /// Фейковий CLI, що друкує секрет у вивід і падає — тобто робить рівно
+    /// те, від чого захищає маскування.
+    const FAKE_CLI_LEAKS_SECRET: &str = r#"echo "token=$TEST_SECRET"; exit 1"#;
+
+    #[test]
+    fn secret_from_a_md_is_injected_and_masked_in_run_file() {
+        // Наскрізна перевірка всього ланцюга: ключ із `a.md` → сховище →
+        // ENV виконавця → замаскований вивід у `run_NNN.md`. Без останньої
+        // ланки перші дві дають хибне відчуття безпеки.
+        let repo = TestRepo::new();
+        let root = repo.work.path().join("mt");
+        node_files_only(&root, "solo");
+        fs::write(
+            root.join("solo/a.md"),
+            "---\nschema_version: 1\nsecrets: [TEST_SECRET]\n---\n",
+        )
+        .unwrap();
+        crate::test_support::commit_all(repo.work.path(), "add solo");
+        crate::test_support::push_head(repo.work.path(), "refs/heads/main");
+
+        let vault = tempfile::tempdir().unwrap();
+        let secrets_file = vault.path().join("secrets.json");
+        fs::write(&secrets_file, r#"{"TEST_SECRET": "sk_live_supersecret"}"#).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&secrets_file, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+
+        let r = root.to_string_lossy().into_owned();
+        with_path_shims(&[("claude", FAKE_CLI_LEAKS_SECRET)], || {
+            std::env::set_var(crate::secrets::SECRETS_FILE_ENV, &secrets_file);
+            let out = run_node_env(&r, "solo", &env_default()).unwrap();
+            std::env::remove_var(crate::secrets::SECRETS_FILE_ENV);
+            assert_eq!(out.result, "failed");
+        });
+
+        let run = fs::read_to_string(root.join("solo/run_001.md")).unwrap();
+        // Секрет дійшов до виконавця (інакше у виводі було б голе `token=`)…
+        assert!(run.contains("token="), "{run}");
+        // …але у файл вузла потрапила маска, а не значення.
+        assert!(
+            !run.contains("sk_live_supersecret"),
+            "секрет протік у run-файл: {run}"
+        );
+        assert!(run.contains(crate::secrets::MASK), "{run}");
     }
 
     #[test]

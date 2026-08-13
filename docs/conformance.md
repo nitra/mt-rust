@@ -16,7 +16,7 @@
 
 | Мілстоун | Стан | Головне, чого бракує |
 | --- | --- | --- |
-| M0 — dogfood ядра | цикл замкнено | recurrence; secrets broker; телеметрія вартості |
+| M0 — dogfood ядра | цикл замкнено | recurrence; sandbox `skill_profiles`; телеметрія вартості |
 | M1 — agent-server | ✅ закрито | — |
 | M2 — mission control | частково | зміна ролі/видалення учасника, ротація/revocation ключів, checkpoint-handoff, CLI `mt sessions` |
 | M3 — dashboard і поверхні | почався | MCP-сервери (чекають secrets-брокера), preview-модуль |
@@ -31,7 +31,7 @@
 | Сканування графа, `deps/`, denylist | РЕАЛІЗОВАНО | `lib.rs` `scan_tasks`/`scan_dir` | — |
 | Derived-стани вузла | РЕАЛІЗОВАНО | `lib.rs` `detect_state`/`apply_remote_claims`/`scan_tasks_with_claims` | — (`blocked-invalid-dep` як warning — поверхня `TaskNode.warnings` є, окремий рядок беклогу) |
 | `failed_streak`: категорія `result` + межа «прийнятий fact» | РЕАЛІЗОВАНО | `lib.rs` `failed_streak`/`is_execution_failure`/`accepted_fact_nnn` | — |
-| Файловий контракт `a.md`/`h.md` | ЧАСТКОВО | `lib.rs` `write_executor_flag`, `runner.rs` `read_executor_flag` | Формат — YAML-фронтматер (закрито); читаються `model_tier`, `agent_cli`, `retry_ladder`. Ще не спожиті: `secrets` (брокер), `interactive`, `assignee`, `parent` |
+| Файловий контракт `a.md`/`h.md` | ЧАСТКОВО | `lib.rs` `write_executor_flag`, `runner.rs` `read_executor_flag` | Формат — YAML-фронтматер (закрито); читаються `model_tier`, `agent_cli`, `retry_ladder`, `secrets`. Ще не спожиті: `interactive`, `assignee`, `parent` |
 | Артефакти version chain (читання) | РЕАЛІЗОВАНО | `artifacts.rs` | — |
 | `schema_version` fail-closed | РЕАЛІЗОВАНО | `frontmatter.rs` `schema_version_of`/`check_schema_version`; гейти — `runner.rs` preflight, `signal.rs` `node_dir`, `spawn.rs` `plan_review` | — (невідома версія — жорстка відмова; відсутнє поле — попередження скану, див. «Закриті питання») |
 | Гейт immutability (`task.md`/`a.md`/`h.md` проти `origin/main`) | РЕАЛІЗОВАНО | `signal.rs` `check_contract_unchanged` (у `signal_success`) | — (стоїть на `done`/`audit`; `failed` свідомо не гейтиться) |
@@ -54,7 +54,8 @@
 | EngineerAgent | РЕАЛІЗОВАНО | `runner.rs` `Actor`/`build_engineer_prompt`/`full_run_history`; CLI — `mt run --actor engineer` | — (GraphPatch реалізовано як дозволені втручання через штатні команди, окремого артефакту спека не задає) |
 | `unresolvable` (3 тригери + алерт) | РЕАЛІЗОВАНО | `lib.rs` `unresolvable_reason`/`write_unresolvable`; алерт — `agent-server/orchestrator.rs` `pending_alerts`; доставка — push тип 3 (`relay/lib/push.mjs`) | — |
 | Recurrence | ВІДСУТНЄ | — | Уся глава `recurrence.md` |
-| Secrets broker / sandbox `skill_profiles` | ВІДСУТНЄ | — | `a.md.secrets` не інжектиться, allowlist немає |
+| Secrets broker | РЕАЛІЗОВАНО | `mt-core/secrets.rs` (сховища: Keychain / файл `0600` / `MT_SECRETS_FILE`, `resolve_keys`, `resolve_ref` для `secret:<key>`, `Masker`); інжекція й маскування — `runner.rs` | — (маскування ловить дослівне значення; закодовані форми — межа, названа в модулі) |
+| Sandbox `skill_profiles` | ВІДСУТНЄ | — | Allowlist команд, network off за замовчуванням, fs-scope worktree |
 | `.mt.json` — дефолти для реалізованого | РЕАЛІЗОВАНО | `config.rs` `config_defaults` | — (ключі нереалізованих фіч свідомо без дефолтів, див. «Закриті питання») |
 
 ## Протокол, сесії, поверхні
@@ -74,7 +75,7 @@
 | Orchestrator-роль у agent-server + wake | РЕАЛІЗОВАНО | `agent-server/orchestrator.rs` `Wake`/`Orchestrator::tick`; relay push → `AppState::wake_orchestrator` | — |
 | `client_kind: mt-dashboard` | РЕАЛІЗОВАНО | фільтр стрічки — `agent-server/ws.rs` `allowed`/`is_graph_event`; емітер `NodeState` — `orchestrator.rs` `state_changes` (лише зміни), публікація — `broadcast_only` у циклі `mt serve` | — (піддерево не звужується на хості: спека кладе агрегацію на клієнта) |
 | Surface-профілі + `ContextSelected` | РЕАЛІЗОВАНО | `mt-core/surfaces.rs` (парсер обох форм конфігу, резолюція hint→липкість→default, стеля `a.md.skills`, `check_context_kind`); хост — `agent-server/ws.rs` (`resolve_turn_surface`, гейт `ContextSelected`, surface у ехо `UserMessage`) | — |
-| MCP-сервери surface | ВІДСУТНЄ | — | `mcp_servers` у `.mt.json`, лінивий старт і idle-TTL, `mcp:<name>` у `tools`; `secret:`-значення чекають на secrets-брокер (окремий рядок) |
+| MCP-сервери surface | ВІДСУТНЄ | — | `mcp_servers` у `.mt.json`, лінивий старт і idle-TTL, `mcp:<name>` у `tools`; резолв `secret:`-значень уже є (`secrets::resolve_ref`) |
 | Preview-модуль (`PreviewScreenshot`, picker) | ВІДСУТНЄ | — | Подія й capability-фільтр є; самого модуля немає |
 
 ## Люди, доступ, relay
