@@ -36,6 +36,9 @@ pub mod nnn;
 pub mod orchestrate;
 /// Fenced publish protocol: atomic multi-ref push результату worktree у `main` з rebase і retry.
 pub mod publish;
+
+/// Мета-цикл ретроспективи: датасет run-історії й детерміновані пропозиції.
+pub mod retro;
 /// Run-wrapper: CAS claim → detached worktree → spawn виконавця → watchdog → підсумок стану.
 pub mod runner;
 /// Обгортка завершення виконавця: запис фактів, результатів і аудит-циклу вузла.

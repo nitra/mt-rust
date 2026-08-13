@@ -21,7 +21,7 @@
 | M2 — mission control | частково | зміна ролі/видалення учасника, ротація/revocation ключів, checkpoint-handoff, CLI `mt sessions` |
 | M3 — dashboard і поверхні | почався | MCP-сервери (чекають secrets-брокера), preview-модуль |
 | M4 — файловий шар i18n | не починався | `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови (`layers/` — суміжна задача, інший контейнер і конфіг) |
-| M5 — мета-цикл retro | не починався | увесь рушій; дані для нього вже накопичуються |
+| M5 — мета-цикл retro | MVP | LLM-крок, innovation/baseline, impact-зрізи, фоновий прогін |
 | M6 — мандати й Дельта | фаза 0 закрита | escalation-intake, маршрутизація за важелем, прецеденти, селектор, профілі, watcher |
 
 ## Ядро графа (`mt-core`)
@@ -102,7 +102,8 @@
 | --- | --- | --- |
 | i18n: конфіг, `refs/mt/i18n`, worktree-матеріалізація, write path у base, lazy-мови | ВІДСУТНЄ | У `crates/` i18n немає. `layers/` покриває суміжну задачу (derived-переклади доків) іншим контейнером (`x.<lang>.md` у робочому дереві), іншим конфігом (`layers.json`) і однонапрямним потоком; contract-awareness там — інструкція моделі, не парсер із fail-closed |
 | i18n: `lang` у ClientHello | РЕАЛІЗОВАНО | `agent-protocol/handshake.rs`; далі хендшейку `lang` не використовується |
-| retro: рушій, пропозиції, innovation, impact | ВІДСУТНЄ | Дані накопичуються (`ledger.rs`, run-історія dogfood-графа), читача немає |
+| retro: датасет і детерміновані пропозиції | РЕАЛІЗОВАНО | `mt-core/retro.rs` (`collect_runs`, `analyze`, приватний звіт `~/.nitra/retro/<period>.md`); CLI — `mt retro`/`mt retro --show`; — (opt-in `retro.enabled`, дефолт `false` — контрактна вимога глави) |
+| retro: LLM-крок, innovation, impact | ВІДСУТНЄ | Детермінований датасет є (рядок вище); LLM-аналіз поверх датасету; `innovation_NNN.md` і baseline; impact-зрізи; фоновий прогін за `schedule_days`; агрегатор компетенцій як другий вихід |
 | Мандати: карта, валідація змін, квіз-гейт, ШІ-мандати | РЕАЛІЗОВАНО | `crates/mt-mandates`: `parse_mandates`, `effective_owner`, `validate_mandate_change` (generation fencing, подвійний підпис `escalates_to`, «остання константа»), `validate_approval` |
 | Мандати: `decision-request`, `awaiting-decision`, `chosen_option` | РЕАЛІЗОВАНО | `mt-core/decision.rs` (артефакт у `decisions/`, маркер стану у вузлі, відповідь), стан — `lib.rs` `detect_state`; CLI — `mt escalate`/`mt decide`; `chosen_option` — `agent-protocol` |
 | Мандати: решта глави | ВІДСУТНЄ | — |
@@ -117,7 +118,7 @@
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
 4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт ✅, `HandoffRequest` через relay ✅, presence ✅.
 5. **M6 фаза 0 — ✅ закрито.** `mandates.yaml` (включно з `kind: model` і `audacity`), валідація змін, квіз-гейт — `crates/mt-mandates`; `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision` і вихід «вичерпана драбина → розвилка» — `mt-core/decision.rs` + `mt escalate`/`mt decide`. Лишається агент escalation-intake: механіка розвилки є, судження «це вибір, а не баг» поки робить людина, що викликає `mt escalate`.
-6. **M3 / M5 / M4.** Dashboard і поверхні (`client_kind: mt-dashboard` ✅, surface-профілі + `ContextSelected` ✅; лишаються MCP-сервери — вони впираються в secrets-брокер — і preview-модуль); retro (MVP не чекає M1–M4 — дані вже є); файловий шар i18n.
+6. **M3 / M5 / M4.** Dashboard і поверхні (`client_kind: mt-dashboard` ✅, surface-профілі + `ContextSelected` ✅; лишаються MCP-сервери — вони впираються в secrets-брокер — і preview-модуль); retro MVP ✅ (детермінований датасет і пропозиції; LLM-крок, innovation та impact — далі); файловий шар i18n.
 
 ## Закриті питання
 
