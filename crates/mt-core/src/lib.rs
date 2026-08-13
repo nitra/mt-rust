@@ -24,8 +24,11 @@ pub mod decision;
 pub mod directory;
 /// Парсинг і байт-точна серіалізація YAML-frontmatter task-файлів.
 pub mod frontmatter;
+
 /// Єдина межа взаємодії mt-core з Git.
 pub mod git;
+/// Файловий шар i18n: схема перекладу, staleness, contract-aware сегментація.
+pub mod i18n;
 /// Cost/time ledger: агрегація `wall_sec`/`tokens_*`/`cost_usd` з усіх `run_NNN.md` графу.
 pub mod ledger;
 /// Lifecycle-мутації вузла: `mt invalidate` і `mt kill` (архівація version chain у `history/`).
