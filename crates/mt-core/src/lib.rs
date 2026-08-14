@@ -45,6 +45,9 @@ pub mod retro;
 /// Run-wrapper: CAS claim → detached worktree → spawn виконавця → watchdog → підсумок стану.
 pub mod runner;
 
+/// Sandbox-профілі скілів: allowlist команд, мережа, fs-scope.
+pub mod sandbox;
+
 /// Secrets-брокер: сховища, інжекція в ENV, маскування у виводах.
 pub mod secrets;
 /// Обгортка завершення виконавця: запис фактів, результатів і аудит-циклу вузла.

@@ -90,6 +90,20 @@ pub struct HandoffArgs {
     pub lang: String,
 }
 
+/// Sandbox-політика хоста для інтерактивних ходів.
+///
+/// Скіли інтерактивної сесії наперед невідомі (вузол підхоплюється в чат
+/// уже під час розмови), тому політика береться з профілів **усіх**
+/// налаштованих скілів: це стеля хоста, а не вузла. Звуження до вузла —
+/// наступний крок, коли гейт знатиме, який саме вузол у кімнаті.
+fn sandbox_policy() -> mt_core::sandbox::Policy {
+    let config = mt_core::config::merge_config(std::fs::read_to_string(".mt.json").ok().as_deref());
+    let all_skills: Vec<String> = mt_core::sandbox::skill_profiles(&config)
+        .map(|profiles| profiles.keys().cloned().collect())
+        .unwrap_or_default();
+    mt_core::sandbox::policy_for(&config, &all_skills)
+}
+
 /// Синхронна обгортка: решта команд `mt` синхронні, тому рантайм
 /// створюється точково, а не робить увесь CLI async.
 fn block_on<F: std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>>(
@@ -145,15 +159,30 @@ async fn run_serve(
         Some(command) => {
             let approval_sessions = Arc::clone(&sessions);
             let approval_gate = Arc::clone(&gate);
+            // Sandbox-політика читається один раз на старті хоста: конфіг
+            // проєкту — не те, що змінюється посеред ходу, а перечитування
+            // на кожен запит дало б вікно, у якому політика вже інша, а
+            // рішення ще старе.
+            let sandbox = Arc::new(sandbox_policy());
             let factory: PermissionFactory = Arc::new(move |node: &str| {
                 let sessions = Arc::clone(&approval_sessions);
                 let gate = Arc::clone(&approval_gate);
+                let sandbox = Arc::clone(&sandbox);
                 let node = node.to_string();
                 let handler: PermissionHandler = Arc::new(move |action, diff| {
                     let sessions = Arc::clone(&sessions);
                     let gate = Arc::clone(&gate);
+                    let sandbox = Arc::clone(&sandbox);
                     let node = node.clone();
                     Box::pin(async move {
+                        // Команда поза allowlist — відмова, а НЕ питання до
+                        // людини (operations.md). Питати означало б робити
+                        // політику предметом переговорів на кожен виклик і
+                        // привчати підписанта тиснути «так».
+                        if let Err(denied) = sandbox.check_command(&action) {
+                            eprintln!("{denied}");
+                            return false;
+                        }
                         let Ok(receiver) = request_approval(&sessions, &gate, &node, action, diff)
                         else {
                             return false;

@@ -1088,9 +1088,8 @@ pub fn run_node_env_as(
     // потрапляють виконавцю ЛИШЕ через ENV процесу — у файлах вузлів їх
     // немає. Відсутній ключ не підставляється порожнім: це попередження в
     // run-файлі, а не тихий провал десь глибше.
-    let secret_keys = crate::secrets::requested_keys(
-        &read_executor_flag(&live_dir)?.unwrap_or(serde_json::Value::Null),
-    );
+    let executor_flag = read_executor_flag(&live_dir)?.unwrap_or(serde_json::Value::Null);
+    let secret_keys = crate::secrets::requested_keys(&executor_flag);
     let (secret_store, store_error) = crate::secrets::default_store(Path::new(
         &std::env::var("HOME").unwrap_or_else(|_| ".".into()),
     ));
@@ -1098,6 +1097,22 @@ pub fn run_node_env_as(
     let masker = crate::secrets::Masker::new(&secrets.env);
     let mut base_envs = base_envs;
     base_envs.extend(secrets.env.iter().cloned());
+
+    // Sandbox-політика вузла (operations.md): allowlist команд, мережа,
+    // fs-scope. Автономний хід виконує CLI власним процесом, тож MT не
+    // перехоплює кожен його виклик — політика їде у ENV, а жорстке
+    // застосування стоїть там, де агент ПИТАЄ дозволу (ACP-гейт).
+    let node_skills: Vec<String> = executor_flag
+        .get("skills")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    base_envs.extend(crate::sandbox::policy_for(&config, &node_skills).env());
     let secret_warnings: Vec<String> = store_error
         .map(|error| error.to_string())
         .into_iter()
