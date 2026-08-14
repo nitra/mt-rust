@@ -105,8 +105,15 @@ where
     /// Дренує prelude-нотифікації, що осіли одразу після відповіді
     /// (`SETTLE_TIMEOUT`), перш ніж повернути керування — інакше вони
     /// приліпляться до першого `prompt`.
-    pub async fn new_session(&mut self, cwd: &str) -> Result<String, AcpError> {
-        let params = json!({ "cwd": cwd, "mcpServers": [] });
+    ///
+    /// `mcp_servers` — декларація MCP-серверів surface (`surfaces.md`);
+    /// порожній масив означає «сервери не оголошені», а не «фіча вимкнена».
+    pub async fn new_session(
+        &mut self,
+        cwd: &str,
+        mcp_servers: &Value,
+    ) -> Result<String, AcpError> {
+        let params = json!({ "cwd": cwd, "mcpServers": mcp_servers });
         let result = self.call("session/new", params, &|_| {}).await?;
         self.settle(&|_| {}).await;
         result["sessionId"]
@@ -445,6 +452,60 @@ mod tests {
         AcpClient::new(read, write, permission)
     }
 
+    /// Fake-агент, що записує params `session/new` замість відповіді за
+    /// сценарієм — щоб перевірити, ЩО саме хост оголошує.
+    async fn recording_agent(stream: tokio::io::DuplexStream, seen: Arc<Mutex<Option<Value>>>) {
+        let (read, mut write) = tokio::io::split(stream);
+        let mut lines = BufReader::new(read).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let message: Value = serde_json::from_str(&line).unwrap();
+            let id = message["id"].clone();
+            match message["method"].as_str() {
+                Some("initialize") => {
+                    respond(
+                        &mut write,
+                        &json!({ "jsonrpc": "2.0", "id": id, "result": { "protocolVersion": 1 } }),
+                    )
+                    .await;
+                }
+                Some("session/new") => {
+                    *seen.lock().unwrap() = Some(message["params"].clone());
+                    respond(
+                        &mut write,
+                        &json!({ "jsonrpc": "2.0", "id": id, "result": { "sessionId": "s1" } }),
+                    )
+                    .await;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// MCP-сервери surface доходять до виконавця у `session/new`.
+    ///
+    /// До цього поле було жорстко порожнім, тобто оголосити тул було
+    /// нікуди — вся глава «Tools: MCP» упиралась саме сюди.
+    #[tokio::test]
+    async fn declared_mcp_servers_reach_session_new() {
+        let seen = Arc::new(Mutex::new(None));
+        let (local, remote) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(recording_agent(remote, Arc::clone(&seen)));
+        let mut client = client_for(local, None);
+
+        let servers = json!([{
+            "name": "figma",
+            "command": "npx",
+            "args": ["figma-mcp"],
+            "env": [{"name": "FIGMA_TOKEN", "value": "fk_1"}]
+        }]);
+        client.initialize().await.unwrap();
+        client.new_session("/tmp", &servers).await.unwrap();
+
+        let params = seen.lock().unwrap().clone().expect("session/new не прийшов");
+        assert_eq!(params["cwd"], "/tmp");
+        assert_eq!(params["mcpServers"], servers);
+    }
+
     /// Повний хід: initialize → session/new → prompt; чанки стають
     /// AgentTextDelta, завершення — AgentTextDone.
     #[tokio::test]
@@ -454,7 +515,7 @@ mod tests {
         let mut client = client_for(local, None);
 
         client.initialize().await.unwrap();
-        let session = client.new_session("/tmp").await.unwrap();
+        let session = client.new_session("/tmp", &serde_json::json!([])).await.unwrap();
         assert_eq!(session, "s1");
 
         let events = Mutex::new(Vec::new());
@@ -488,7 +549,7 @@ mod tests {
             let mut client = client_for(local, Some(handler));
 
             client.initialize().await.unwrap();
-            let session = client.new_session("/tmp").await.unwrap();
+            let session = client.new_session("/tmp", &serde_json::json!([])).await.unwrap();
             let events = Mutex::new(Vec::new());
             let emit = |event: Event| events.lock().unwrap().push(event);
             client.prompt(&session, "запиши", &emit).await.unwrap();
@@ -514,7 +575,7 @@ mod tests {
         let mut client = client_for(local, None);
 
         client.initialize().await.unwrap();
-        let session = client.new_session("/tmp").await.unwrap();
+        let session = client.new_session("/tmp", &serde_json::json!([])).await.unwrap();
 
         let events = Mutex::new(Vec::new());
         let emit = |event: Event| events.lock().unwrap().push(event);

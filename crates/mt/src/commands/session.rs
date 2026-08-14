@@ -90,6 +90,36 @@ pub struct HandoffArgs {
     pub lang: String,
 }
 
+/// MCP-сервери, оголошені всіма surface-профілями проєкту.
+///
+/// Обʼєднання, а не вибірка під конкретний surface: ACP-сесія кімнати
+/// відкривається один раз, а surface ходу може змінитись усередині розмови
+/// («тицьнув елемент → designer; переписати абзац → writer»). Звуження до
+/// surface ходу потребує переоткриття сесії при перемиканні — окремий крок,
+/// і робити його наосліп тут було б гірше, ніж оголосити набір проєкту.
+///
+/// Сервер, який не зібрався (невідоме імʼя, нерезолвлений секрет), не
+/// пропускається мовчки — про нього друкується причина, бо surface обіцяв
+/// агенту тул, якого не буде.
+fn mcp_servers_payload(config: &serde_json::Value) -> serde_json::Value {
+    let (store, store_error) = mt_core::secrets::default_store(std::path::Path::new(
+        &std::env::var("HOME").unwrap_or_else(|_| ".".into()),
+    ));
+    if let Some(error) = store_error {
+        eprintln!("MCP: {error}");
+    }
+    let mut resolved = Vec::new();
+    for (name, profile) in mt_core::surfaces::surface_profiles(config) {
+        match mt_core::mcp::servers_for_surface(config, &profile, store.as_ref()) {
+            Ok(servers) => resolved.extend(servers),
+            Err(error) => eprintln!("surface {name}: {error}"),
+        }
+    }
+    resolved.sort_by(|a, b| a.name.cmp(&b.name));
+    resolved.dedup_by(|a, b| a.name == b.name);
+    mt_core::mcp::acp_payload(&resolved)
+}
+
 /// Sandbox-політика хоста для інтерактивних ходів.
 ///
 /// Скіли інтерактивної сесії наперед невідомі (вузол підхоплюється в чат
@@ -197,7 +227,16 @@ async fn run_serve(
                 handler
             });
             println!("ACP-адаптер: {command}");
-            Arc::new(AcpTurnRunner::new(&command, Some(factory)))
+            let project_config = mt_core::config::merge_config(
+                std::fs::read_to_string(".mt.json").ok().as_deref(),
+            );
+            let mcp = mcp_servers_payload(&project_config);
+            if let Some(count) = mcp.as_array().map(Vec::len) {
+                if count > 0 {
+                    println!("MCP-серверів оголошено: {count}");
+                }
+            }
+            Arc::new(AcpTurnRunner::new(&command, Some(factory)).with_mcp_servers(mcp))
         }
         None => Arc::new(EchoTurnRunner),
     };
