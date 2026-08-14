@@ -31,6 +31,9 @@ pub mod git;
 pub mod i18n;
 /// Cost/time ledger: агрегація `wall_sec`/`tokens_*`/`cost_usd` з усіх `run_NNN.md` графу.
 pub mod ledger;
+
+/// MCP-сервери surface: декларація, резолв секретів, payload для ACP.
+pub mod mcp;
 /// Lifecycle-мутації вузла: `mt invalidate` і `mt kill` (архівація version chain у `history/`).
 pub mod lifecycle;
 /// NNN-нумерація артефактів (`run_NNN.md`, `fact_NNN.md`, …) — чисті функції над іменами файлів.

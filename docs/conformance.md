@@ -19,7 +19,7 @@
 | M0 — dogfood ядра | цикл замкнено | recurrence; телеметрія вартості; sandbox — політика є, ізоляції рівня ОС немає |
 | M1 — agent-server | ✅ закрито | — |
 | M2 — mission control | частково | зміна ролі/видалення учасника, ротація/revocation ключів, checkpoint-handoff, CLI `mt sessions` |
-| M3 — dashboard і поверхні | почався | MCP-сервери (чекають secrets-брокера), preview-модуль |
+| M3 — dashboard і поверхні | почався | preview-модуль; MCP — звуження набору до surface ходу |
 | M4 — файловий шар i18n | ядро | сховище `refs/mt/i18n`, write path, черга регенерації, live-шар |
 | M5 — мета-цикл retro | MVP | LLM-крок, innovation/baseline, impact-зрізи, фоновий прогін |
 | M6 — мандати й Дельта | фаза 0 закрита | escalation-intake, маршрутизація за важелем, прецеденти, селектор, профілі, watcher |
@@ -71,11 +71,11 @@
 | Інтерактивний run = run вузла | РЕАЛІЗОВАНО | `agent-server/graph.rs` | Інтерактивні політики (`progress_timeout_sec`), телеметрія ходів |
 | Handoff між хостами | ЧАСТКОВО | `agent-protocol` `HandoffRequest`/`HandoffAck`/`HandoffPull`; `agent-server/ws.rs` `pull_node`/`serve_handoff_request`, доставка — `relay_client.rs` (виняток host↔host з анти-циклу); CLI — `mt handoff` | Checkpoint-режим (`mt handoff --checkpoint`, git.md): дистильований summary + archive ref для повного журналу |
 | Approvals-гейт mid-run + матеріалізація | РЕАЛІЗОВАНО | `agent-server/approvals_gate.rs` `ApprovalRecord::to_yaml_line`; запис — `ws.rs` → `InteractiveRun::add_approval` → `run_NNN.md` | — |
-| ACP-транспорт | РЕАЛІЗОВАНО | `agent-core/acp.rs` | `mcpServers` жорстко порожній |
+| ACP-транспорт | РЕАЛІЗОВАНО | `agent-core/acp.rs` | — |
 | Orchestrator-роль у agent-server + wake | РЕАЛІЗОВАНО | `agent-server/orchestrator.rs` `Wake`/`Orchestrator::tick`; relay push → `AppState::wake_orchestrator` | — |
 | `client_kind: mt-dashboard` | РЕАЛІЗОВАНО | фільтр стрічки — `agent-server/ws.rs` `allowed`/`is_graph_event`; емітер `NodeState` — `orchestrator.rs` `state_changes` (лише зміни), публікація — `broadcast_only` у циклі `mt serve` | — (піддерево не звужується на хості: спека кладе агрегацію на клієнта) |
 | Surface-профілі + `ContextSelected` | РЕАЛІЗОВАНО | `mt-core/surfaces.rs` (парсер обох форм конфігу, резолюція hint→липкість→default, стеля `a.md.skills`, `check_context_kind`); хост — `agent-server/ws.rs` (`resolve_turn_surface`, гейт `ContextSelected`, surface у ехо `UserMessage`) | — |
-| MCP-сервери surface | ВІДСУТНЄ | — | `mcp_servers` у `.mt.json`, лінивий старт і idle-TTL, `mcp:<name>` у `tools`; резолв `secret:`-значень уже є (`secrets::resolve_ref`) |
+| MCP-сервери surface | ЧАСТКОВО | `mt-core/mcp.rs` (декларація, `mcp:<name>` у `tools`, резолв `secret:` через брокер, ACP-payload); доставка — `agent-core/acp.rs` `session/new`, збірка — `mt serve` | Оголошується обʼєднання профілів проєкту, не набір surface ходу (потребує переоткриття ACP-сесії при перемиканні); лінивий старт і `idle_ttl_sec` виконує ACP-виконавець, MT їх лише декларує |
 | Preview-модуль (`PreviewScreenshot`, picker) | ВІДСУТНЄ | — | Подія й capability-фільтр є; самого модуля немає |
 
 ## Люди, доступ, relay
@@ -120,7 +120,7 @@
 3. **M1 доведення + wake.** Orchestrator-роль, continuous backfill, remote claims у скані, `stalled`, злиття `agent-cli` у `mt serve|attach`, backpressure, глибокий реплей.
 4. **M2 mission control.** Першим — матеріалізація підпису в `## Approvals` (це буквально demo-критерій), далі персистентний store ✅, auth ✅, push-транспорт ✅, `HandoffRequest` через relay ✅, presence ✅.
 5. **M6 фаза 0 — ✅ закрито.** `mandates.yaml` (включно з `kind: model` і `audacity`), валідація змін, квіз-гейт — `crates/mt-mandates`; `decision-request` із `leverage_facets`, `chosen_option`, стан `awaiting-decision` і вихід «вичерпана драбина → розвилка» — `mt-core/decision.rs` + `mt escalate`/`mt decide`. Лишається агент escalation-intake: механіка розвилки є, судження «це вибір, а не баг» поки робить людина, що викликає `mt escalate`.
-6. **M3 / M5 / M4.** Dashboard і поверхні (`client_kind: mt-dashboard` ✅, surface-профілі + `ContextSelected` ✅; лишаються MCP-сервери — вони впираються в secrets-брокер — і preview-модуль); retro MVP ✅ (детермінований датасет і пропозиції; LLM-крок, innovation та impact — далі); файловий шар i18n (контрактне ядро ✅; сховище в ref-і, write path і черга регенерації — далі).
+6. **M3 / M5 / M4.** Dashboard і поверхні (`client_kind: mt-dashboard` ✅, surface-профілі + `ContextSelected` ✅; MCP-сервери ✅; лишається preview-модуль); retro MVP ✅ (детермінований датасет і пропозиції; LLM-крок, innovation та impact — далі); файловий шар i18n (контрактне ядро ✅; сховище в ref-і, write path і черга регенерації — далі).
 
 ## Закриті питання
 

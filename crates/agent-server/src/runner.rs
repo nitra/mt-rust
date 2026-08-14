@@ -62,6 +62,9 @@ struct AcpRoom {
 pub struct AcpTurnRunner {
     argv: Vec<String>,
     permission_factory: Option<PermissionFactory>,
+    /// Декларація MCP-серверів у формі ACP (`surfaces.md`). Порожній масив —
+    /// сервери не оголошені.
+    mcp_servers: serde_json::Value,
     rooms: tokio::sync::Mutex<HashMap<String, AcpRoom>>,
 }
 
@@ -72,8 +75,16 @@ impl AcpTurnRunner {
         Self {
             argv: command.split_whitespace().map(str::to_string).collect(),
             permission_factory,
+            mcp_servers: serde_json::Value::Array(Vec::new()),
             rooms: tokio::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Оголошує MCP-сервери, які підуть у `session/new`.
+    #[must_use]
+    pub fn with_mcp_servers(mut self, servers: serde_json::Value) -> Self {
+        self.mcp_servers = servers;
+        self
     }
 
     /// Спавнить адаптер і відкриває ACP-сесію кімнати (initialize +
@@ -120,7 +131,7 @@ impl AcpTurnRunner {
                 .into_owned(),
         };
         let session_id = client
-            .new_session(&cwd)
+            .new_session(&cwd, &self.mcp_servers)
             .await
             .map_err(|e| TurnError(e.to_string()))?;
         Ok(AcpRoom {
