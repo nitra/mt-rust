@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "agent-core"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "agent-protocol",
  "serde_json",
@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "agent-protocol"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "base64",
  "chrono",
@@ -25,7 +25,7 @@ dependencies = [
 
 [[package]]
 name = "agent-server"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "agent-core",
  "agent-protocol",
@@ -2074,7 +2074,7 @@ dependencies = [
 
 [[package]]
 name = "mt"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "agent-core",
  "agent-protocol",
@@ -2095,7 +2095,7 @@ dependencies = [
 
 [[package]]
 name = "mt-core"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "chrono",
  "gix",
@@ -2107,7 +2107,7 @@ dependencies = [
 
 [[package]]
 name = "mt-mandates"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "agent-protocol",
  "ed25519-dalek",
