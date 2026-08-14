@@ -111,6 +111,51 @@ function storeContract(label, makeStore) {
       expect((await store.deviceByToken(device_token)).last_seen).toBe('2026-08-12T10:00:00Z')
     })
 
+    test('ротація: retired лишається в історії, але зникає з pubkeys', async () => {
+      // Історію ключів тримаємо, бо історичні підписи в git лишаються
+      // валідним фактом; з обігу ключ має зникнути негайно.
+      const store = await makeStore()
+      const account = await store.createAccount({ email: `rot-${Date.now()}@x` })
+      const root = `root-${Date.now()}-rot`
+      await store.createTask(root, account.account_id)
+      const old = await store.registerDevice(account.account_id, {
+        name: 'mac',
+        role: 'host',
+        pubkey: key('old')
+      })
+      const fresh = await store.registerDevice(account.account_id, {
+        name: 'mac',
+        role: 'host',
+        pubkey: key('new')
+      })
+      expect((await store.pubkeysFor(root)).map(k => k.device_id).sort()).toEqual(
+        [old.device_id, fresh.device_id].sort()
+      )
+
+      await store.retireDevice(old.device_id, '2026-08-14T00:00:00Z')
+      expect((await store.pubkeysFor(root)).map(k => k.device_id)).toEqual([fresh.device_id])
+      // …але в історії акаунта він лишається, з міткою часу.
+      const history = await store.devicesOf(account.account_id)
+      expect(history.find(d => d.device_id === old.device_id).retired_at).toBe('2026-08-14T00:00:00Z')
+    })
+
+    test('revocation: пристрій зникає і з pubkeys, і з історії', async () => {
+      const store = await makeStore()
+      const account = await store.createAccount({ email: `rev-${Date.now()}@x` })
+      const root = `root-${Date.now()}-rev`
+      await store.createTask(root, account.account_id)
+      const device = await store.registerDevice(account.account_id, {
+        name: 'втрачений',
+        role: 'client',
+        pubkey: key('lost')
+      })
+
+      await store.deleteDevice(device.device_id)
+      expect(await store.pubkeysFor(root)).toEqual([])
+      expect(await store.devicesOf(account.account_id)).toEqual([])
+      expect(await store.deviceByToken(device.device_token)).toBeNull()
+    })
+
     test('createTask робить власника owner автоматично', async () => {
       const store = await makeStore()
       const owner = await store.createAccount({ email: `o-${Date.now()}@x` })

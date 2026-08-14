@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | M0 — dogfood ядра | цикл замкнено | recurrence; телеметрія вартості; sandbox — політика є, ізоляції рівня ОС немає |
 | M1 — agent-server | ✅ закрито | — |
-| M2 — mission control | частково | зміна ролі/видалення учасника, ротація/revocation ключів, checkpoint-handoff, CLI `mt sessions` |
+| M2 — mission control | частково | checkpoint-handoff, CLI `mt sessions` |
 | M3 — dashboard і поверхні | почався | preview-модуль; MCP — звуження набору до surface ходу |
 | M4 — файловий шар i18n | ядро | сховище `refs/mt/i18n`, write path, черга регенерації, live-шар |
 | M5 — мета-цикл retro | MVP | LLM-крок, innovation/baseline, impact-зрізи, фоновий прогін |
@@ -86,9 +86,9 @@
 | Схема даних relay | РЕАЛІЗОВАНО | `relay/lib/store.mjs` (dev), `sqlite-store.mjs` + `schema.sql` (персистентна), міграції колонок — `SqliteStore.migrate`, вибір — `create-store.mjs`; контракт — `tests/store-contract.test.mjs` | — |
 | Auth акаунтів | ЧАСТКОВО | `relay/lib/auth.mjs` (`DevMagicAuth`, `KratosAuth`), вибір — `create-auth.mjs`; контракт — `tests/auth-contract.test.mjs` | Passkey/WebAuthn і recovery — у Kratos, свого flow relay не має; сумісність із живим Kratos не перевірена (stub-`fetch` доводить лише обробку форми `whoami`) |
 | Реєстрація пристрою | РЕАЛІЗОВАНО | `relay/lib/relay.mjs` `registerDevice` за сесією, кадр `register_device`; запис — `store.mjs` | — |
-| Ротація/revocation pubkey | ВІДСУТНЄ | — | Немає історії ключів і видалення пристрою |
+| Ротація/revocation pubkey | РЕАЛІЗОВАНО | `relay/lib/relay.mjs` `rotateDevice`/`revokeDevice`, кадри `rotate_device`/`revoke_device`; store — `retireDevice`/`deleteDevice`/`devicesOf`, колонка `retired_at` + міграція | — (retired лишається в історії, з роздачі зникає одразу) |
 | Membership: invite/accept/decline | РЕАЛІЗОВАНО | `relay/lib/relay.mjs` | — |
-| Membership: зміна ролі / видалення | ВІДСУТНЄ | store-методи є, API немає | `MemberChanged {role: null}` ніколи не емітується |
+| Membership: зміна ролі / видалення | РЕАЛІЗОВАНО | `relay/lib/relay.mjs` `changeMemberRole`/`removeMember`, кадри `set_member_role`/`remove_member`; `MemberChanged {role: null}` на видалення | — (пониження/видалення останнього owner-а відхиляється — див. «Закриті питання») |
 | Transfer ownership із підписом | РЕАЛІЗОВАНО | `relay/lib/relay.mjs`, `agent-protocol/transfers.rs` | — |
 | Кімнати, буфер, viewer read-only | РЕАЛІЗОВАНО | `relay/lib/rooms.mjs` | — |
 | Presence | РЕАЛІЗОВАНО | `relay/lib/presence.mjs` (ефемерний реєстр із TTL), гейти й трансляція — `relay.mjs` `announcePresence`/`dropPresence`/`presenceOf`, кадри `presence`/`who`; оголошує сам хост — `agent-server/relay_client.rs` (heartbeat 30 с) | — (`mt sessions` як поверхня — окремий рядок CLI) |
@@ -123,6 +123,8 @@
 6. **M3 / M5 / M4.** Dashboard і поверхні (`client_kind: mt-dashboard` ✅, surface-профілі + `ContextSelected` ✅; MCP-сервери ✅; лишається preview-модуль); retro MVP ✅ (детермінований датасет і пропозиції; LLM-крок, innovation та impact — далі); файловий шар i18n (контрактне ядро ✅; сховище в ref-і, write path і черга регенерації — далі).
 
 ## Закриті питання
+
+- **Останнього owner-а не понизити й не прибрати** (2026-08-14): `access.md` описує Membership API (`PATCH role` / `DELETE`) і окремо каже, що для **зниклого єдиного owner-а** потрібна адміністративна процедура оператора relay «за явною згодою всіх учасників із роллю host». Тобто стан «задача без власника» спека визнає, але виводить із нього не API, а ручною процедурою. Рішення: звичайний API такий стан **створити не може** — пониження або видалення останнього owner-а відхиляється. Дешевше не дати створити стан, ніж будувати з нього вихід; штатний шлях лишається той самий — `transfer ownership` або другий owner наперед (succession зі спеки).
 
 - **Sandbox не вмикається сам** (2026-08-13): `operations.md` каже «команда поза allowlist → відмова», але не каже, що робити з проєктом, який `skill_profiles` не налаштував. Deny-by-default для такого проєкту зламав би кожен наявний вузол мовчазною відмовою — і «безпека» звелася б до того, що її вимикають назад. Рішення: **секції немає → політика не enforcing** (поведінка як до її появи); **секція є → у її межах allowlist жорсткий, а `network` вимкнено, доки його не ввімкнули явно**. Це властивість коду (`Policy::is_enforcing`), а не домовленість у коментарі.
 

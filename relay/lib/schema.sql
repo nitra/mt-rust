@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS devices (
   -- тому це окреме поле, а не частина реєстрації пристрою; порожній рядок —
   -- пристрій без push (headless-хост, тест).
   push_token   TEXT NOT NULL DEFAULT '',
+  -- Ротація ключа (access.md): стара keypair позначається retired із
+  -- зафіксованим моментом, а не видаляється — relay тримає історію
+  -- pubkey-ів пристрою, бо історичні підписи в git лишаються валідним
+  -- фактом. NULL = пристрій активний.
+  retired_at   TEXT,
   last_seen    TEXT
 );
 

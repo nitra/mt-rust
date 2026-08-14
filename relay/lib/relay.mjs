@@ -9,7 +9,7 @@
 import { Presence } from './presence.mjs'
 import { Rooms } from './rooms.mjs'
 import { transferMessage, verifySignature } from './signing.mjs'
-import { roleAtLeast } from './store.mjs'
+import { ROLES, roleAtLeast } from './store.mjs'
 
 /** Ядро relay поверх store + rooms (+ опційний push-маршрутизатор). */
 export class RelayCore {
@@ -250,6 +250,126 @@ export class RelayCore {
       throw new Error('decline відхилено: запрошення не існує або адресоване іншому')
     }
     await this.store.setInvitationStatus(invitationId, 'declined')
+  }
+
+  /**
+   * `PATCH role` (access.md, «Membership API relay») — owner змінює роль
+   * учасника.
+   *
+   * Пониження останнього owner-а відхиляється: задача без власника
+   * потрапляє в стан, який спека закриває **адміністративною процедурою
+   * оператора relay**, а не звичайним API. Дешевше не дати створити цей
+   * стан, ніж потім із нього виходити.
+   * @param {string} ownerAccount акаунт-ініціатор
+   * @param {string} root кореневий вузол задачі
+   * @param {string} accountId кому міняємо роль
+   * @param {string} role нова роль
+   * @returns {Promise<void>} завершення
+   * @throws {Error} не owner, не учасник або останній owner
+   */
+  async changeMemberRole(ownerAccount, root, accountId, role) {
+    if ((await this.store.memberRole(root, ownerAccount)) !== 'owner') {
+      throw new Error('зміна ролі відхилена: змінює лише owner')
+    }
+    const current = await this.store.memberRole(root, accountId)
+    if (!current) throw new Error('зміна ролі відхилена: акаунт не учасник задачі')
+    if (!ROLES.includes(role)) throw new Error(`зміна ролі відхилена: невідома роль ${role}`)
+    if (current === 'owner' && role !== 'owner' && (await this.ownerCount(root)) === 1) {
+      throw new Error('зміна ролі відхилена: це останній owner задачі')
+    }
+    await this.store.setMemberRole(root, accountId, role)
+    this.rooms.publish(root, {
+      kind: 'event',
+      event: { type: 'MemberChanged', account_id: accountId, role }
+    })
+  }
+
+  /**
+   * `DELETE` (access.md) — owner прибирає учасника; у кімнату йде
+   * `MemberChanged` з `role: null`, як задає протокол.
+   * @param {string} ownerAccount акаунт-ініціатор
+   * @param {string} root кореневий вузол задачі
+   * @param {string} accountId кого прибираємо
+   * @returns {Promise<void>} завершення
+   * @throws {Error} не owner, не учасник або останній owner
+   */
+  async removeMember(ownerAccount, root, accountId) {
+    if ((await this.store.memberRole(root, ownerAccount)) !== 'owner') {
+      throw new Error('видалення відхилено: прибирає лише owner')
+    }
+    const current = await this.store.memberRole(root, accountId)
+    if (!current) throw new Error('видалення відхилено: акаунт не учасник задачі')
+    if (current === 'owner' && (await this.ownerCount(root)) === 1) {
+      throw new Error('видалення відхилено: це останній owner задачі')
+    }
+    await this.store.removeMember(root, accountId)
+    this.rooms.publish(root, {
+      kind: 'event',
+      event: { type: 'MemberChanged', account_id: accountId, role: null }
+    })
+  }
+
+  /**
+   * Скільки owner-ів у задачі — інваріант «власник завжди є».
+   * @param {string} root кореневий вузол задачі
+   * @returns {Promise<number>} кількість
+   */
+  async ownerCount(root) {
+    return (await this.store.membersOf(root)).filter(member => member.role === 'owner').length
+  }
+
+  /**
+   * Ротація ключа пристрою (access.md): нова keypair реєструється, стара
+   * позначається `retired`.
+   *
+   * Ротацію ініціює **інший пристрій того самого акаунта** — чужий акаунт
+   * не має підстав вирішувати за власника ключа.
+   * @param {object} device підключений пристрій-ініціатор
+   * @param {string} targetDeviceId який пристрій ротуємо
+   * @param {{ name?: string, role?: string, pubkey: string }} replacement нова keypair
+   * @returns {Promise<{device_id: string, device_token: string}>} новий пристрій
+   * @throws {Error} чужий акаунт або невалідний pubkey
+   */
+  async rotateDevice(device, targetDeviceId, replacement) {
+    const target = await this.deviceOfSameAccount(device, targetDeviceId)
+    const created = await this.store.registerDevice(device.account_id, {
+      name: replacement.name ?? target.name,
+      role: replacement.role ?? target.role,
+      pubkey: replacement.pubkey
+    })
+    await this.store.retireDevice(targetDeviceId)
+    return created
+  }
+
+  /**
+   * Revocation пристрою (компрометація — access.md): пристрій видаляється,
+   * нові підписи перестають прийматись, щойно спливе pubkey-кеш хоста.
+   *
+   * Матеріалізовані історичні підписи не інвалідовуються — вони факт про
+   * момент прийому, а не про поточний стан ключа.
+   * @param {object} device підключений пристрій-ініціатор
+   * @param {string} targetDeviceId який пристрій відкликаємо
+   * @returns {Promise<void>} завершення
+   * @throws {Error} чужий акаунт
+   */
+  async revokeDevice(device, targetDeviceId) {
+    await this.deviceOfSameAccount(device, targetDeviceId)
+    await this.store.deleteDevice(targetDeviceId)
+  }
+
+  /**
+   * Пристрій того самого акаунта або явна відмова.
+   * @param {object} device пристрій-ініціатор
+   * @param {string} targetDeviceId цільовий пристрій
+   * @returns {Promise<object>} запис цільового пристрою
+   * @throws {Error} немає такого пристрою або він чужого акаунта
+   */
+  async deviceOfSameAccount(device, targetDeviceId) {
+    const own = (await this.store.devicesOf(device.account_id)).find(
+      candidate => candidate.device_id === targetDeviceId
+    )
+    if (!own) throw new Error('операція над пристроєм відхилена: пристрій не цього акаунта')
+    return own
   }
 
   /**

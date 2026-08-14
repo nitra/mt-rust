@@ -26,7 +26,7 @@ function tokenEquals(a, b) {
 }
 
 /** Ролі учасників задачі (access.md): owner ⊃ host ⊃ approver ⊃ viewer. */
-const ROLES = ['owner', 'host', 'approver', 'viewer']
+export const ROLES = ['owner', 'host', 'approver', 'viewer']
 
 /**
  * Чи достатня роль `actual` для мінімально потрібної `required`.
@@ -103,10 +103,53 @@ export class InMemoryStore {
       name,
       device_token: randomUUID(),
       push_token: '',
+      retired_at: null,
       last_seen: null
     }
     this.devices.set(device.device_id, device)
     return { device_id: device.device_id, device_token: device.device_token }
+  }
+
+  /**
+   * Позначає пристрій `retired` (ротація ключа — access.md).
+   *
+   * Не видаляє: історія pubkey-ів потрібна, бо історичні підписи в git
+   * лишаються валідним фактом.
+   * @param {string} deviceId пристрій
+   * @param {string} [at] мітка часу ISO8601; дефолт — зараз
+   * @returns {Promise<void>} завершення запису
+   */
+  async retireDevice(deviceId, at = new Date().toISOString()) {
+    const device = this.devices.get(deviceId)
+    if (device) device.retired_at = at
+  }
+
+  /**
+   * Видаляє пристрій (revocation після компрометації — access.md).
+   * @param {string} deviceId пристрій
+   * @returns {Promise<void>} завершення запису
+   */
+  async deleteDevice(deviceId) {
+    this.devices.delete(deviceId)
+  }
+
+  /**
+   * Пристрої акаунта, включно з retired — це і є історія ключів.
+   * @param {string} accountId акаунт
+   * @returns {Promise<object[]>} пристрої
+   */
+  async devicesOf(accountId) {
+    return this.devices
+      .values()
+      .filter(device => device.account_id === accountId)
+      .map(({ device_id, name, role, pubkey, retired_at }) => ({
+        device_id,
+        name,
+        role,
+        pubkey,
+        retired_at: retired_at ?? null
+      }))
+      .toArray()
   }
 
   /**
@@ -302,9 +345,11 @@ export class InMemoryStore {
     const approvers = new Set(
       (await this.membersOf(rootNodeHash)).filter(m => roleAtLeast(m.role, 'approver')).map(m => m.account_id)
     )
+    // Retired-пристрої не роздаються: ротація має знімати ключ із обігу
+    // негайно, інакше хост приймав би підписи старою keypair.
     return this.devices
       .values()
-      .filter(device => approvers.has(device.account_id))
+      .filter(device => approvers.has(device.account_id) && !device.retired_at)
       .map(({ device_id, account_id, pubkey }) => ({ device_id, account_id, pubkey }))
       .toArray()
   }

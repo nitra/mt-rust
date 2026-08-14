@@ -394,3 +394,56 @@ test('presence через WS: оголошення, who, зняття при р�
   expect(empty.devices).toEqual([])
   watcher.socket.close()
 })
+
+test('membership-адмін через WS: зміна ролі, видалення, ротація ключа', async () => {
+  const admin = await collectingSocket(server.port)
+  admin.socket.send(JSON.stringify({ kind: 'hello', device_token: hostToken }))
+  await admin.waitFor(frame => Boolean(frame.device_id))
+
+  // Після transfer вище owner кореня — approver@x; беремо його пристрій.
+  const approverDevice = await store.registerDevice(approver.account_id, {
+    name: 'approver-admin',
+    role: 'client',
+    pubkey: fakeKey('approver-admin')
+  })
+  const ownerSocket = await collectingSocket(server.port)
+  ownerSocket.socket.send(JSON.stringify({ kind: 'hello', device_token: approverDevice.device_token }))
+  const hello = await ownerSocket.waitFor(frame => Boolean(frame.device_id))
+
+  // PATCH role: owner понижує учасника.
+  const guest = await store.createAccount({ email: 'guest@x' })
+  await store.setMemberRole('root-1', guest.account_id, 'host')
+  ownerSocket.socket.send(
+    JSON.stringify({
+      kind: 'set_member_role',
+      root: 'root-1',
+      account_id: guest.account_id,
+      role: 'viewer'
+    })
+  )
+  const changed = await ownerSocket.waitFor(frame => frame.role === 'viewer')
+  expect(changed.account_id).toBe(guest.account_id)
+  expect(await store.memberRole('root-1', guest.account_id)).toBe('viewer')
+
+  // DELETE: учасник зникає, у кадрі — role: null.
+  ownerSocket.socket.send(JSON.stringify({ kind: 'remove_member', root: 'root-1', account_id: guest.account_id }))
+  const removed = await ownerSocket.waitFor(frame => frame.kind === 'ok' && frame.role === null)
+  expect(removed.account_id).toBe(guest.account_id)
+  expect(await store.memberRole('root-1', guest.account_id)).toBeNull()
+
+  // Ротація ключа власного пристрою.
+  ownerSocket.socket.send(
+    JSON.stringify({
+      kind: 'rotate_device',
+      device_id: hello.device_id,
+      pubkey: fakeKey('approver-admin-v2')
+    })
+  )
+  const rotated = await ownerSocket.waitFor(frame => frame.kind === 'device')
+  expect(rotated.device_id).not.toBe(hello.device_id)
+  const history = await store.devicesOf(approver.account_id)
+  expect(history.find(d => d.device_id === hello.device_id).retired_at).toBeTruthy()
+
+  admin.socket.close()
+  ownerSocket.socket.close()
+})
