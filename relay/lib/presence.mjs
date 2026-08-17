@@ -97,6 +97,6 @@ export class Presence {
       this.rooms.delete(root)
       return []
     }
-    return [...room.values()]
+    return room.values().toArray()
   }
 }

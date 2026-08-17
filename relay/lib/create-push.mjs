@@ -7,6 +7,7 @@
  * без будь-якої з частин непрацездатний, і краще лишитись у dev-режимі
  * явно, ніж падати на першій нотифікації.
  */
+import process from 'node:process'
 import { FcmPushSink, GoogleAccessToken } from './fcm-sink.mjs'
 import { DevPushSink } from './push-sink.mjs'
 

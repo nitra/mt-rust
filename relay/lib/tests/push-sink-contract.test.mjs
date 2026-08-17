@@ -9,8 +9,8 @@
  * relay формує документовані запити і правильно реагує на документовані
  * відповіді, і НЕ доводить доставки живим FCM.
  */
-import { Buffer } from 'node:buffer'
 import { generateKeyPairSync } from 'node:crypto'
+import { TextDecoder } from 'node:util'
 
 import { describe, expect, test } from 'vitest'
 
@@ -20,6 +20,15 @@ import { InMemoryStore } from '../store.mjs'
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
 const PEM = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
+
+/**
+ * base64url → текст.
+ * @param {string} value сегмент JWT
+ * @returns {string} декодований текст
+ */
+function decodeBase64url(value) {
+  return new TextDecoder().decode(Uint8Array.fromBase64(value, { alphabet: 'base64url' }))
+}
 
 /**
  * Акаунт із зареєстрованим пристроєм і push-токеном.
@@ -203,8 +212,8 @@ describe('fcm: форма запиту', () => {
   test('JWT-assertion підписаний і несе скоуп FCM', async () => {
     const { sink } = setup(OK_ROUTE)
     const [header, claims, signature] = sink.accessToken.assertion().split('.')
-    expect(JSON.parse(Buffer.from(header, 'base64url').toString())).toEqual({ alg: 'RS256', typ: 'JWT' })
-    expect(JSON.parse(Buffer.from(claims, 'base64url').toString())).toMatchObject({
+    expect(JSON.parse(decodeBase64url(header))).toEqual({ alg: 'RS256', typ: 'JWT' })
+    expect(JSON.parse(decodeBase64url(claims))).toMatchObject({
       iss: 'svc@proj.iam',
       scope: 'https://www.googleapis.com/auth/firebase.messaging',
       aud: 'https://oauth2.googleapis.com/token'

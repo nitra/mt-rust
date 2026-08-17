@@ -84,11 +84,11 @@ async function collectingSocket(port) {
   await once(socket, 'open')
   const waitFor = async matches => {
     for (;;) {
-      const index = inbox.findIndex(matches)
+      const index = inbox.findIndex(frame => matches(frame))
       if (index >= 0) return inbox.splice(index, 1)[0]
-      await new Promise(resolve => {
-        notify = resolve
-      })
+      const pending = Promise.withResolvers()
+      notify = pending.resolve
+      await pending.promise
     }
   }
   return { socket, waitFor }

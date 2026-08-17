@@ -114,7 +114,7 @@ describe('presence у ядрі relay', () => {
 
   test('announce транслює PresenceChanged учасникам кімнати', async () => {
     const inbox = []
-    await core.subscribe(ownerDevice, 'root-1', frame => inbox.push(frame))
+    await core.subscribe(ownerDevice, 'root-1', frame => void inbox.push(frame))
     await core.announcePresence(ownerDevice, 'root-1', {
       hostname: 'mac-vitalii',
       projects: ['mt'],
@@ -135,7 +135,7 @@ describe('presence у ядрі relay', () => {
   test('dropPresence транслює gone і прибирає із переліку', async () => {
     const inbox = []
     await core.announcePresence(ownerDevice, 'root-1', { hostname: 'mac' })
-    await core.subscribe(ownerDevice, 'root-1', frame => inbox.push(frame))
+    await core.subscribe(ownerDevice, 'root-1', frame => void inbox.push(frame))
 
     core.dropPresence(ownerDevice, 'root-1')
     expect(inbox.at(-1)).toMatchObject({

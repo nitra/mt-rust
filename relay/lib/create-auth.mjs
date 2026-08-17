@@ -7,6 +7,7 @@
  * `NODE_ENV`), щоб продакшн-режим не можна було ввімкнути наполовину:
  * без адреси Kratos перевіряти сесію нічим.
  */
+import process from 'node:process'
 import { DevMagicAuth, KratosAuth } from './auth.mjs'
 
 /**

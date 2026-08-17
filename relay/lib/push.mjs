@@ -29,6 +29,20 @@ const WAKE_COOLDOWN_MS = 30_000
 /** Маршрутизатор push поверх store, кімнат і sink-а. */
 export class PushRouter {
   /**
+   * Класифікує подію: тип 3 (потребує уваги) чи ні.
+   * @param {object} event подія Envelope
+   * @returns {boolean} чи потребує уваги
+   */
+  static needsAttention(event) {
+    if (ATTENTION_TYPES.has(event.type)) return true
+    if (event.type !== 'NodeState') return false
+    // `pending` — увага лише для явно призначеної людини з `notify: true`
+    // (h.md): інакше кожен вузол, що став до черги, будив би всю кімнату.
+    if (event.state === 'pending') return event.notify === true
+    return ATTENTION_STATES.has(event.state)
+  }
+
+  /**
    * @param {{ store: object, sink: object, rooms?: object, wakeCooldownMs?: number, now?: () => number }} deps залежності
    */
   constructor({ store, sink, rooms = null, wakeCooldownMs = WAKE_COOLDOWN_MS, now = () => Date.now() }) {
@@ -53,20 +67,6 @@ export class PushRouter {
     if (!account) return false
     await this.sink.deliver(account.account_id, { type: 2, root, reason: 'invited' })
     return true
-  }
-
-  /**
-   * Класифікує подію: тип 3 (потребує уваги) чи ні.
-   * @param {object} event подія Envelope
-   * @returns {boolean} чи потребує уваги
-   */
-  static needsAttention(event) {
-    if (ATTENTION_TYPES.has(event.type)) return true
-    if (event.type !== 'NodeState') return false
-    // `pending` — увага лише для явно призначеної людини з `notify: true`
-    // (h.md): інакше кожен вузол, що став до черги, будив би всю кімнату.
-    if (event.state === 'pending') return event.notify === true
-    return ATTENTION_STATES.has(event.state)
   }
 
   /**

@@ -19,6 +19,20 @@
  */
 import { randomUUID } from 'node:crypto'
 
+/**
+ * Прибирає кінцеві слеші без регулярного виразу.
+ *
+ * Наївний `/\/+$/` дає суперлінійний бектрекінг на рядку з довгим хвостом
+ * слешів — дешевий вектор ReDoS, тому це цикл, а не regex.
+ * @param {string} value адреса
+ * @returns {string} адреса без кінцевих слешів
+ */
+function stripTrailingSlashes(value) {
+  let end = value.length
+  while (end > 0 && value[end - 1] === '/') end -= 1
+  return value.slice(0, end)
+}
+
 /** Дефолтний час життя сесії — доба (реалізація, не контракт). */
 export const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -121,7 +135,7 @@ export class KratosAuth {
    */
   constructor({ store, baseUrl, fetch = globalThis.fetch }) {
     this.store = store
-    this.baseUrl = String(baseUrl ?? '').replace(/\/+$/, '')
+    this.baseUrl = stripTrailingSlashes(String(baseUrl ?? ''))
     this.fetch = fetch
   }
 
