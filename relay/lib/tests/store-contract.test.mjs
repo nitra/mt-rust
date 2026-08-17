@@ -10,6 +10,7 @@
  * Обидві прогоняються завжди: SQLite бере `:memory:`-базу, тож перевірка
  * не потребує ні інфраструктури, ні змінних середовища.
  */
+import { Buffer } from 'node:buffer'
 import { randomUUID } from 'node:crypto'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -128,8 +129,8 @@ function storeContract(label, makeStore) {
         role: 'host',
         pubkey: key('new')
       })
-      expect((await store.pubkeysFor(root)).map(k => k.device_id).sort()).toEqual(
-        [old.device_id, fresh.device_id].sort()
+      expect((await store.pubkeysFor(root)).map(k => k.device_id).toSorted()).toEqual(
+        [old.device_id, fresh.device_id].toSorted()
       )
 
       await store.retireDevice(old.device_id, '2026-08-14T00:00:00Z')

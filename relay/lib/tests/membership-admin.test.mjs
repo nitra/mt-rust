@@ -44,7 +44,7 @@ beforeEach(async () => {
 describe('PATCH role', () => {
   test('owner міняє роль; у кімнату йде MemberChanged', async () => {
     const inbox = []
-    await core.subscribe(ownerDevice, 'root-1', frame => inbox.push(frame))
+    await core.subscribe(ownerDevice, 'root-1', frame => void inbox.push(frame))
 
     await core.changeMemberRole(accounts.owner.account_id, 'root-1', accounts.host.account_id, 'approver')
     expect(await store.memberRole('root-1', accounts.host.account_id)).toBe('approver')
@@ -91,7 +91,7 @@ describe('DELETE учасника', () => {
   test('owner прибирає учасника; MemberChanged несе role: null', async () => {
     // `role: null` — саме те, що протокол задає для видалення.
     const inbox = []
-    await core.subscribe(ownerDevice, 'root-1', frame => inbox.push(frame))
+    await core.subscribe(ownerDevice, 'root-1', frame => void inbox.push(frame))
 
     await core.removeMember(accounts.owner.account_id, 'root-1', accounts.host.account_id)
     expect(await store.memberRole('root-1', accounts.host.account_id)).toBeNull()

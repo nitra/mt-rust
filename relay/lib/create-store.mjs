@@ -6,6 +6,7 @@
  * перемикання не змінює поведінки relay — лише те, чи переживають дані
  * рестарт процесу.
  */
+import process from 'node:process'
 import { InMemoryStore } from './store.mjs'
 
 /**

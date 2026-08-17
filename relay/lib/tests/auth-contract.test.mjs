@@ -81,7 +81,8 @@ authContract('kratos', () => {
   return {
     auth,
     tokenFor: async email => {
-      const token = `kratos-${(seq += 1)}`
+      seq += 1
+      const token = `kratos-${seq}`
       stub.register(token, { active: true, identity: { traits: { email } } })
       return token
     }
@@ -92,7 +93,7 @@ describe('dev-magic: час життя сесії', () => {
   test('прострочена сесія відхиляється так само, як невідома', async () => {
     // «Прострочено» і «невідомо» навмисно нерозрізнювані для викликача:
     // різні повідомлення дали б оракул на існування токена.
-    let clock = 1_000
+    let clock = 1000
     const auth = new DevMagicAuth({ store: new InMemoryStore(), ttlMs: 100, now: () => clock })
     const { token } = await auth.issueSession('ttl@x')
     expect(await auth.verifySession(token)).toBeTruthy()

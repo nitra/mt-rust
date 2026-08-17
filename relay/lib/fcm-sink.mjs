@@ -16,6 +16,21 @@
  */
 import { Buffer } from 'node:buffer'
 import { createSign } from 'node:crypto'
+import { URLSearchParams } from 'node:url'
+
+/**
+ * Прибирає кінцеві слеші без регулярного виразу.
+ *
+ * Наївний `/\/+$/` дає суперлінійний бектрекінг на рядку з довгим хвостом
+ * слешів — дешевий вектор ReDoS, тому це цикл, а не regex.
+ * @param {string} value адреса
+ * @returns {string} адреса без кінцевих слешів
+ */
+function stripTrailingSlashes(value) {
+  let end = value.length
+  while (end > 0 && value[end - 1] === '/') end -= 1
+  return value.slice(0, end)
+}
 
 /** Скоуп, якого вимагає FCM HTTP v1. */
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging'
@@ -32,7 +47,7 @@ const ASSERTION_TTL_SEC = 3600
  * @returns {string} base64url
  */
 function base64url(value) {
-  return Buffer.from(value).toString('base64url')
+  return Buffer.from(value).toBase64({ alphabet: 'base64url', omitPadding: true })
 }
 
 /**
@@ -123,7 +138,7 @@ export class FcmPushSink {
     this.projectId = projectId
     this.accessToken = accessToken
     this.fetch = fetch
-    this.endpoint = String(endpoint).replace(/\/+$/, '')
+    this.endpoint = stripTrailingSlashes(String(endpoint))
   }
 
   /**
