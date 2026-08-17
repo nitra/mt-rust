@@ -32,7 +32,10 @@ const SCHEMA_PATH = join(dirname(fileURLToPath(import.meta.url)), 'schema.sql')
  * версії, і пропуск проміжного кроку зробив би міграцію непослідовною.
  * @type {[string, string, string][]}
  */
-const ADDED_COLUMNS = [['devices', 'push_token', "TEXT NOT NULL DEFAULT ''"]]
+const ADDED_COLUMNS = [
+  ['devices', 'push_token', "TEXT NOT NULL DEFAULT ''"],
+  ['devices', 'retired_at', 'TEXT']
+]
 
 /** ISO8601 — той самий формат часу, що і в in-memory реалізації. */
 function now() {
@@ -138,6 +141,39 @@ export class SqliteStore {
    */
   async deviceByToken(token) {
     return this.db.query('SELECT * FROM devices WHERE device_token = ?').get(token ?? '') ?? null
+  }
+
+  /**
+   * Позначає пристрій `retired` (ротація ключа — access.md).
+   *
+   * Не видаляє: історія pubkey-ів потрібна, бо історичні підписи в git
+   * лишаються валідним фактом — їх перевірив хост на момент прийому.
+   * @param {string} deviceId пристрій
+   * @param {string} [at] мітка часу ISO8601; дефолт — зараз
+   * @returns {Promise<void>} завершення запису
+   */
+  async retireDevice(deviceId, at = now()) {
+    this.db.query('UPDATE devices SET retired_at = ? WHERE device_id = ?').run(at, deviceId)
+  }
+
+  /**
+   * Видаляє пристрій (revocation після компрометації — access.md).
+   * @param {string} deviceId пристрій
+   * @returns {Promise<void>} завершення запису
+   */
+  async deleteDevice(deviceId) {
+    this.db.query('DELETE FROM devices WHERE device_id = ?').run(deviceId)
+  }
+
+  /**
+   * Пристрої акаунта, включно з retired — це і є історія ключів.
+   * @param {string} accountId акаунт
+   * @returns {Promise<object[]>} пристрої
+   */
+  async devicesOf(accountId) {
+    return this.db
+      .query('SELECT device_id, name, role, pubkey, retired_at FROM devices WHERE account_id = ?')
+      .all(accountId)
   }
 
   /**
@@ -333,10 +369,12 @@ export class SqliteStore {
       .map(member => member.account_id)
     if (approvers.length === 0) return []
     const placeholders = approvers.map(() => '?').join(', ')
+    // Retired-пристрої не роздаються: ротація має знімати ключ із обігу
+    // негайно, інакше хост приймав би підписи старою keypair.
     return this.db
       .query(
         `SELECT device_id, account_id, pubkey FROM devices
-         WHERE account_id IN (${placeholders})`
+         WHERE account_id IN (${placeholders}) AND retired_at IS NULL`
       )
       .all(...approvers)
   }

@@ -7,8 +7,10 @@
  * `{kind:"subscribe", root}`, `{kind:"envelope", root, envelope}`,
  * `{kind:"set_push_token", push_token}`,
  * presence (`{kind:"presence", root, hostname, projects, nodes}`, `{kind:"who", root}`),
- * membership-операції (`invite`, `accept`, `decline`, `transfer_ownership`
- * з Ed25519-підписом акта, `bootstrap_owners`);
+ * membership-операції (`invite`, `accept`, `decline`, `set_member_role`,
+ * `remove_member`, `transfer_ownership` з Ed25519-підписом акта,
+ * `bootstrap_owners`), життєвий цикл ключів (`rotate_device`,
+ * `revoke_device`);
  * relay → `{kind:"ok"|"error", ...}`, `{kind:"envelope"|"event", ...}`.
  * Ліміт кадру — 2 МБ (stack.md). Помилки авторизації/ролей — `error`-кадр,
  * зʼєднання не рветься (клієнт може виправитись).
@@ -109,6 +111,33 @@ async function handleFrame(core, state, frame, send) {
     case 'decline': {
       await core.decline(frame.invitation_id, state.device.account_id)
       send({ kind: 'ok', declined: frame.invitation_id })
+      break
+    }
+    case 'set_member_role': {
+      await core.changeMemberRole(state.device.account_id, frame.root, frame.account_id, frame.role)
+      send({ kind: 'ok', account_id: frame.account_id, role: frame.role })
+      break
+    }
+    case 'remove_member': {
+      await core.removeMember(state.device.account_id, frame.root, frame.account_id)
+      send({ kind: 'ok', account_id: frame.account_id, role: null })
+      break
+    }
+    case 'rotate_device': {
+      // Ротація ключа: нова keypair реєструється, стара стає retired.
+      send({
+        kind: 'device',
+        ...(await core.rotateDevice(state.device, frame.device_id, {
+          name: frame.name,
+          role: frame.role,
+          pubkey: frame.pubkey
+        }))
+      })
+      break
+    }
+    case 'revoke_device': {
+      await core.revokeDevice(state.device, frame.device_id)
+      send({ kind: 'ok', revoked: frame.device_id })
       break
     }
     case 'transfer_ownership': {
