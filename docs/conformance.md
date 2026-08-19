@@ -16,10 +16,10 @@
 
 | Мілстоун | Стан | Головне, чого бракує |
 | --- | --- | --- |
-| M0 — dogfood ядра | цикл замкнено | recurrence; телеметрія вартості; sandbox — політика є, ізоляції рівня ОС немає |
+| M0 — dogfood ядра | цикл замкнено | recurrence; телеметрія вартості |
 | M1 — agent-server | ✅ закрито | — |
 | M2 — mission control | частково | checkpoint-handoff, CLI `mt sessions` |
-| M3 — dashboard і поверхні | почався | preview-модуль; MCP — звуження набору до surface ходу |
+| M3 — dashboard і поверхні | почався | preview-модуль (MCP — розвиток спинено, див. «Закриті питання») |
 | M4 — файловий шар i18n | ядро | сховище `refs/mt/i18n`, write path, черга регенерації, live-шар |
 | M5 — мета-цикл retro | MVP | LLM-крок, innovation/baseline, impact-зрізи, фоновий прогін |
 | M6 — мандати й Дельта | фаза 0 закрита | escalation-intake, маршрутизація за важелем, прецеденти, селектор, профілі, watcher |
