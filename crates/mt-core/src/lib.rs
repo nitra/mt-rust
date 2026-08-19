@@ -30,6 +30,8 @@ pub mod git;
 /// Файловий шар i18n: схема перекладу, staleness, contract-aware сегментація.
 pub mod i18n;
 /// Cost/time ledger: агрегація `wall_sec`/`tokens_*`/`cost_usd` з усіх `run_NNN.md` графу.
+pub mod isolation;
+
 pub mod ledger;
 
 /// MCP-сервери surface: декларація, резолв секретів, payload для ACP.

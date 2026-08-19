@@ -1113,6 +1113,12 @@ pub fn run_node_env_as(
         })
         .unwrap_or_default();
     base_envs.extend(crate::sandbox::policy_for(&config, &node_skills).env());
+
+    // Режим ізоляції читається один раз на run: конфіг посеред ходу не
+    // змінюється, а перечитування на кожен щабель драбини дало б вікно, у
+    // якому щаблі йдуть із різними межами.
+    let isolation = crate::isolation::isolation_mode(&config);
+    let isolation_writable = crate::isolation::extra_writable(&config);
     let secret_warnings: Vec<String> = store_error
         .map(|error| error.to_string())
         .into_iter()
@@ -1142,8 +1148,24 @@ pub fn run_node_env_as(
             let Some((prog, args)) = build_agent_cli_argv(&cli, model.as_deref(), prompt) else {
                 continue; // невідоме ім'я у каскаді — пропускаємо
             };
-            let mut cmd = Command::new(prog);
-            cmd.args(args).current_dir(&dir);
+            // Ізоляція рівня ОС (`isolation.rs`): запис лише у worktree.
+            // Корінь — саме worktree, а не тека вузла: агент штатно чіпає
+            // весь чекаут (код, тести, конфіги), і звуження до теки вузла
+            // зробило б пісочницю непридатною, а не суворішою.
+            let wrapped = match crate::isolation::wrap(
+                isolation,
+                &worktree,
+                &isolation_writable,
+                &prog,
+                &args,
+            ) {
+                Ok(wrapped) => wrapped,
+                // Fail closed: ізоляцію попросили, застосувати не вдалося —
+                // це відмова run-а, а не тихий запуск без неї.
+                Err(error) => return Err(error.to_string()),
+            };
+            let mut cmd = Command::new(&wrapped.program);
+            cmd.args(&wrapped.args).current_dir(&dir);
             cmd.envs(base_envs.iter().cloned());
             cmd.env("MT_AGENT_CLI", &cli);
             let w = spawn_watched(
@@ -2273,7 +2295,12 @@ printf -- '---\nschema_version: 1\n---\n\n## Summary\n\nok\n' > "fact_${MT_RUN_N
 
     /// Тимчасовий bin-каталог із фейковими CLI, prepended до PATH.
     fn with_path_shims(shims: &[(&str, &str)], f: impl FnOnce()) {
-        let _guard = PATH_LOCK.lock().unwrap();
+        // `unwrap_or_else(into_inner)`, а не `unwrap()`: м'ютекс лише
+        // серіалізує мутацію PATH, жодного інваріанта він не боронить. З
+        // `unwrap()` одна невдача (зокрема тимчасова, за budget) отруювала
+        // замок і перетворювалась на десяток PoisonError у сусідніх тестах —
+        // справжню причину доводилось відкопувати з-під наслідків.
+        let _guard = PATH_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let bin = tempfile::tempdir().unwrap();
         for (name, body) in shims {
             let p = bin.path().join(name);
