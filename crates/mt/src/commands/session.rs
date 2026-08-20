@@ -120,18 +120,9 @@ fn mcp_servers_payload(config: &serde_json::Value) -> serde_json::Value {
     mt_core::mcp::acp_payload(&resolved)
 }
 
-/// Sandbox-політика хоста для інтерактивних ходів.
-///
-/// Скіли інтерактивної сесії наперед невідомі (вузол підхоплюється в чат
-/// уже під час розмови), тому політика береться з профілів **усіх**
-/// налаштованих скілів: це стеля хоста, а не вузла. Звуження до вузла —
-/// наступний крок, коли гейт знатиме, який саме вузол у кімнаті.
-fn sandbox_policy() -> mt_core::sandbox::Policy {
-    let config = mt_core::config::merge_config(std::fs::read_to_string(".mt.json").ok().as_deref());
-    let all_skills: Vec<String> = mt_core::sandbox::skill_profiles(&config)
-        .map(|profiles| profiles.keys().cloned().collect())
-        .unwrap_or_default();
-    mt_core::sandbox::policy_for(&config, &all_skills)
+/// Конфіг проєкту для sandbox-політики гейта.
+fn sandbox_config() -> serde_json::Value {
+    mt_core::config::merge_config(std::fs::read_to_string(".mt.json").ok().as_deref())
 }
 
 /// Синхронна обгортка: решта команд `mt` синхронні, тому рантайм
@@ -189,15 +180,25 @@ async fn run_serve(
         Some(command) => {
             let approval_sessions = Arc::clone(&sessions);
             let approval_gate = Arc::clone(&gate);
-            // Sandbox-політика читається один раз на старті хоста: конфіг
-            // проєкту — не те, що змінюється посеред ходу, а перечитування
-            // на кожен запит дало б вікно, у якому політика вже інша, а
-            // рішення ще старе.
-            let sandbox = Arc::new(sandbox_policy());
+            // Конфіг читається один раз на старті хоста: він не змінюється
+            // посеред ходу, а перечитування на кожен запит дало б вікно, у
+            // якому політика вже інша, а рішення ще старе.
+            let sandbox_config = Arc::new(sandbox_config());
+            let sandbox_tasks_dir = std::env::current_dir()
+                .map(|cwd| cwd.join("mt"))
+                .unwrap_or_else(|_| std::path::PathBuf::from("mt"));
             let factory: PermissionFactory = Arc::new(move |node: &str| {
                 let sessions = Arc::clone(&approval_sessions);
                 let gate = Arc::clone(&approval_gate);
-                let sandbox = Arc::clone(&sandbox);
+                // Політика **вузла** кімнати: фабрика знає, для якого вузла
+                // відкривається ACP-сесія, тож звуження до `a.md.skills`
+                // рахується тут, один раз на кімнату. Вузол без `a.md` —
+                // стеля хоста (sandbox.rs, `policy_for_node`).
+                let sandbox = Arc::new(mt_core::sandbox::policy_for_node(
+                    &sandbox_config,
+                    &sandbox_tasks_dir,
+                    node,
+                ));
                 let node = node.to_string();
                 let handler: PermissionHandler = Arc::new(move |action, diff| {
                     let sessions = Arc::clone(&sessions);
@@ -227,9 +228,8 @@ async fn run_serve(
                 handler
             });
             println!("ACP-адаптер: {command}");
-            let project_config = mt_core::config::merge_config(
-                std::fs::read_to_string(".mt.json").ok().as_deref(),
-            );
+            let project_config =
+                mt_core::config::merge_config(std::fs::read_to_string(".mt.json").ok().as_deref());
             let mcp = mcp_servers_payload(&project_config);
             if let Some(count) = mcp.as_array().map(Vec::len) {
                 if count > 0 {

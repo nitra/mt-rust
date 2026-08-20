@@ -20,8 +20,6 @@ pub mod config;
 
 /// Розвилки: `decision-request`, стан `awaiting-decision`, відповідь власника.
 pub mod decision;
-/// Мапінг handle → PII з git-ignored `.mt/directory.json` (у git-файлах лишаються лише handles).
-pub mod directory;
 /// Парсинг і байт-точна серіалізація YAML-frontmatter task-файлів.
 pub mod frontmatter;
 
@@ -32,12 +30,13 @@ pub mod i18n;
 /// Cost/time ledger: агрегація `wall_sec`/`tokens_*`/`cost_usd` з усіх `run_NNN.md` графу.
 pub mod isolation;
 
+/// Леджер вузла: агрегація `wall_sec`, `tokens_*` і `cost_usd` з `run_NNN.md` графу.
 pub mod ledger;
 
-/// MCP-сервери surface: декларація, резолв секретів, payload для ACP.
-pub mod mcp;
 /// Lifecycle-мутації вузла: `mt invalidate` і `mt kill` (архівація version chain у `history/`).
 pub mod lifecycle;
+/// MCP-сервери surface: декларація, резолв секретів, payload для ACP.
+pub mod mcp;
 /// NNN-нумерація артефактів (`run_NNN.md`, `fact_NNN.md`, …) — чисті функції над іменами файлів.
 pub mod nnn;
 /// Оркестратор `run --auto`: одноразовий прохід по `waiting` агентських вузлах чергами по `agent_concurrency`.

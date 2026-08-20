@@ -277,6 +277,50 @@ pub fn policy_for(config: &Value, skills: &[String]) -> Policy {
     policy
 }
 
+/// Скіли вузла з його `a.md`. `None` — прапорця немає (людський вузол,
+/// ad-hoc кімната), і це відрізняється від «є, але порожній».
+pub fn node_skills(tasks_dir: &Path, node: &str) -> Option<Vec<String>> {
+    let text = std::fs::read_to_string(Path::new(tasks_dir).join(node).join("a.md")).ok()?;
+    let front = crate::frontmatter::parse_front_matter(&text);
+    Some(
+        front
+            .get("skills")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+/// Стеля хоста — обʼєднання **всіх** налаштованих профілів.
+///
+/// Це не політика вузла, а верхня межа: нею користуються там, де вузол
+/// невідомий або не декларує скілів.
+pub fn host_ceiling(config: &Value) -> Policy {
+    let all: Vec<String> = skill_profiles(config)
+        .map(|profiles| profiles.keys().cloned().collect())
+        .unwrap_or_default();
+    policy_for(config, &all)
+}
+
+/// Політика конкретного вузла зі стелею хоста як fallback.
+///
+/// Вузол із `a.md` отримує рівно те звуження, яке сам задекларував; вузол
+/// без `a.md` (людський, ad-hoc кімната `mt attach`) — стелю хоста.
+/// Забороняти все в цьому разі означало б ламати штатний сценарій заради
+/// принципу: `a.md` описує **агентний** контракт, а його відсутність не є
+/// заявою «нічого не можна».
+pub fn policy_for_node(config: &Value, tasks_dir: &Path, node: &str) -> Policy {
+    match node_skills(tasks_dir, node) {
+        Some(skills) if !skills.is_empty() => policy_for(config, &skills),
+        _ => host_ceiling(config),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +337,50 @@ mod tests {
 
     fn skills(names: &[&str]) -> Vec<String> {
         names.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn write_node(root: &Path, node: &str, a_md: Option<&str>) {
+        let dir = root.join(node);
+        std::fs::create_dir_all(&dir).unwrap();
+        if let Some(body) = a_md {
+            std::fs::write(dir.join("a.md"), body).unwrap();
+        }
+    }
+
+    #[test]
+    fn node_policy_uses_its_own_skills() {
+        let root = tempfile::tempdir().unwrap();
+        write_node(
+            root.path(),
+            "solo",
+            Some("---\nschema_version: 1\nskills: [bash]\n---\n"),
+        );
+        let policy = policy_for_node(&config(), root.path(), "solo");
+        assert!(policy.check_command("git status").is_ok());
+        // web-search вузол не просив — його дозволи не течуть сюди.
+        assert!(policy.check_command("curl x").is_err());
+    }
+
+    #[test]
+    fn node_without_a_md_falls_back_to_host_ceiling() {
+        // `a.md` описує агентний контракт; його відсутність (людський вузол,
+        // ad-hoc кімната `mt attach`) не є заявою «нічого не можна».
+        let root = tempfile::tempdir().unwrap();
+        write_node(root.path(), "human", None);
+        let policy = policy_for_node(&config(), root.path(), "human");
+        assert!(policy.check_command("git status").is_ok());
+        assert!(policy.check_command("curl x").is_ok(), "стеля хоста ширша");
+    }
+
+    #[test]
+    fn node_with_empty_skills_also_falls_back() {
+        // Порожній список читається як «не звужую», однаково з відсутнім —
+        // інакше `skills: []` мовчки блокував би вузол.
+        let root = tempfile::tempdir().unwrap();
+        write_node(root.path(), "empty", Some("---\nschema_version: 1\n---\n"));
+        assert!(policy_for_node(&config(), root.path(), "empty")
+            .check_command("curl x")
+            .is_ok());
     }
 
     #[test]

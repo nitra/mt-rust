@@ -5,4 +5,3 @@
 .marksman.toml
 .claude/settings.local.json
 crates/mt-core/tests/fixtures/name-vectors.json
-layers/schemas/layers.schema.json

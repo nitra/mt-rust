@@ -2300,7 +2300,9 @@ printf -- '---\nschema_version: 1\n---\n\n## Summary\n\nok\n' > "fact_${MT_RUN_N
         // `unwrap()` одна невдача (зокрема тимчасова, за budget) отруювала
         // замок і перетворювалась на десяток PoisonError у сусідніх тестах —
         // справжню причину доводилось відкопувати з-під наслідків.
-        let _guard = PATH_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = PATH_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let bin = tempfile::tempdir().unwrap();
         for (name, body) in shims {
             let p = bin.path().join(name);
