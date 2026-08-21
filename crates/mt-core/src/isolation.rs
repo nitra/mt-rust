@@ -115,9 +115,10 @@ pub struct Wrapped {
 /// пісочниця забороняє запис навіть у власний worktree. Симптом — «усе
 /// зламалось», причина — непомітна.
 fn canonical(path: &Path) -> Result<PathBuf, IsolationError> {
-    path.canonicalize().map_err(|_| IsolationError::Unresolvable {
-        path: path.to_path_buf(),
-    })
+    path.canonicalize()
+        .map_err(|_| IsolationError::Unresolvable {
+            path: path.to_path_buf(),
+        })
 }
 
 /// Текст профілю `sandbox-exec` (macOS).
@@ -177,7 +178,11 @@ pub fn wrap(
         // Нерезолвний додатковий шлях пропускаємо мовчки: він міг бути
         // задекларований наперед (кеш, якого ще немає), і це не привід
         // валити run.
-        writable.extend(extra.iter().filter_map(|path| Path::new(path).canonicalize().ok()));
+        writable.extend(
+            extra
+                .iter()
+                .filter_map(|path| Path::new(path).canonicalize().ok()),
+        );
         let mut wrapped = vec![
             "-p".to_string(),
             macos_profile(&root, &writable),
@@ -234,7 +239,9 @@ mod tests {
         // ранні, тож дозвіл до заборони не дав би нічого.
         let profile = macos_profile(Path::new("/repo/wt"), &[]);
         let deny = profile.find("(deny file-write*)").expect("немає заборони");
-        let allow = profile.find("(allow file-write* (subpath \"/repo/wt\"))").unwrap();
+        let allow = profile
+            .find("(allow file-write* (subpath \"/repo/wt\"))")
+            .unwrap();
         assert!(deny < allow, "{profile}");
     }
 
@@ -278,7 +285,10 @@ mod tests {
             &[],
         )
         .unwrap_err();
-        assert!(matches!(error, IsolationError::Unresolvable { .. }), "{error:?}");
+        assert!(
+            matches!(error, IsolationError::Unresolvable { .. }),
+            "{error:?}"
+        );
     }
 
     /// Найважливіший тест модуля: пісочниця справді ізолює, а не лише
@@ -316,8 +326,14 @@ mod tests {
             .expect("sandbox-exec не запустився");
         let stdout = String::from_utf8_lossy(&out.stdout);
 
-        assert!(inside_file.exists(), "запис у worktree мусив пройти: {stdout}");
-        assert!(stdout.contains("DENIED"), "запис поза worktree не заборонено: {stdout}");
+        assert!(
+            inside_file.exists(),
+            "запис у worktree мусив пройти: {stdout}"
+        );
+        assert!(
+            stdout.contains("DENIED"),
+            "запис поза worktree не заборонено: {stdout}"
+        );
         assert!(!forbidden.exists(), "файл поза worktree створено");
         let _ = outside_file;
     }

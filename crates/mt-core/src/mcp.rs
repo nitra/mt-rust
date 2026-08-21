@@ -236,8 +236,7 @@ mod tests {
 
     #[test]
     fn secret_ref_is_resolved_into_env() {
-        let servers =
-            servers_for_surface(&config(), &profile(&["mcp:figma"]), &store()).unwrap();
+        let servers = servers_for_surface(&config(), &profile(&["mcp:figma"]), &store()).unwrap();
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].env["FIGMA_TOKEN"], "fk_live_1");
         assert_eq!(servers[0].idle_ttl_sec, 600);
@@ -248,8 +247,7 @@ mod tests {
         // Підставити літерал `secret:…` означало б віддати серверу рядок
         // замість токена і отримати незрозумілу відмову вже всередині нього.
         let empty = MemorySecretStore::default();
-        let error =
-            servers_for_surface(&config(), &profile(&["mcp:figma"]), &empty).unwrap_err();
+        let error = servers_for_surface(&config(), &profile(&["mcp:figma"]), &empty).unwrap_err();
         assert_eq!(
             error,
             McpError::MissingSecret {
@@ -287,8 +285,7 @@ mod tests {
     #[test]
     fn declaration_without_command_is_refused() {
         let config = json!({"mcp_servers": {"broken": {"args": ["x"]}}});
-        let error =
-            servers_for_surface(&config, &profile(&["mcp:broken"]), &store()).unwrap_err();
+        let error = servers_for_surface(&config, &profile(&["mcp:broken"]), &store()).unwrap_err();
         assert_eq!(
             error,
             McpError::NoCommand {
@@ -299,8 +296,7 @@ mod tests {
 
     #[test]
     fn idle_ttl_defaults_to_spec_value() {
-        let servers =
-            servers_for_surface(&config(), &profile(&["mcp:browser"]), &store()).unwrap();
+        let servers = servers_for_surface(&config(), &profile(&["mcp:browser"]), &store()).unwrap();
         assert_eq!(servers[0].idle_ttl_sec, DEFAULT_IDLE_TTL_SEC);
     }
 
@@ -317,8 +313,7 @@ mod tests {
     fn acp_payload_uses_protocol_env_shape() {
         // ACP описує env масивом пар {name, value}; обʼєкт конфігу тут
         // розійшовся б із протоколом.
-        let servers =
-            servers_for_surface(&config(), &profile(&["mcp:figma"]), &store()).unwrap();
+        let servers = servers_for_surface(&config(), &profile(&["mcp:figma"]), &store()).unwrap();
         assert_eq!(
             acp_payload(&servers),
             json!([{

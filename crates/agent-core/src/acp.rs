@@ -501,7 +501,11 @@ mod tests {
         client.initialize().await.unwrap();
         client.new_session("/tmp", &servers).await.unwrap();
 
-        let params = seen.lock().unwrap().clone().expect("session/new не прийшов");
+        let params = seen
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("session/new не прийшов");
         assert_eq!(params["cwd"], "/tmp");
         assert_eq!(params["mcpServers"], servers);
     }
@@ -515,7 +519,10 @@ mod tests {
         let mut client = client_for(local, None);
 
         client.initialize().await.unwrap();
-        let session = client.new_session("/tmp", &serde_json::json!([])).await.unwrap();
+        let session = client
+            .new_session("/tmp", &serde_json::json!([]))
+            .await
+            .unwrap();
         assert_eq!(session, "s1");
 
         let events = Mutex::new(Vec::new());
@@ -549,7 +556,10 @@ mod tests {
             let mut client = client_for(local, Some(handler));
 
             client.initialize().await.unwrap();
-            let session = client.new_session("/tmp", &serde_json::json!([])).await.unwrap();
+            let session = client
+                .new_session("/tmp", &serde_json::json!([]))
+                .await
+                .unwrap();
             let events = Mutex::new(Vec::new());
             let emit = |event: Event| events.lock().unwrap().push(event);
             client.prompt(&session, "запиши", &emit).await.unwrap();
@@ -575,7 +585,10 @@ mod tests {
         let mut client = client_for(local, None);
 
         client.initialize().await.unwrap();
-        let session = client.new_session("/tmp", &serde_json::json!([])).await.unwrap();
+        let session = client
+            .new_session("/tmp", &serde_json::json!([]))
+            .await
+            .unwrap();
 
         let events = Mutex::new(Vec::new());
         let emit = |event: Event| events.lock().unwrap().push(event);

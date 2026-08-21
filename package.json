@@ -3,15 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "workspaces": [
-    "relay",
-    "layers"
+    "relay"
   ],
   "type": "module",
   "scripts": {
     "test": "bunx --bun vitest run",
     "oxfmt": "oxfmt .",
-    "coverage": "npx @7n/rules lint test --no-fix",
-    "layers": "bun ./layers/lib/cli.mjs"
+    "coverage": "npx @7n/rules lint test --no-fix"
   },
   "devDependencies": {
     "@7n/mt": "^0.30.8",
